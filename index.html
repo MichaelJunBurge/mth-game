@@ -289,7 +289,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 6vh;
+    gap: 3vh;
   }
   body.won .winscreen { display: flex; }
   .win-label {
@@ -304,6 +304,35 @@
     font-weight: 700;
     color: var(--ink);
     line-height: 1;
+  }
+  .win-sub {
+    font-size: clamp(0.9rem, 1.6vw, 1.6rem);
+    font-weight: 500;
+    color: var(--grey);
+    text-align: center;
+    min-height: 1em;
+  }
+  /* Opponent's working, revealed after a shared game ends */
+  .win-their {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3em;
+    max-width: 80vw;
+  }
+  .win-their.show { display: flex; }
+  .their-title {
+    font-size: clamp(0.85rem, 1.3vw, 1.3rem);
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 0.4em;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .their-line {
+    font-size: clamp(0.85rem, 1.3vw, 1.3rem);
+    font-weight: 400;
+    color: #9a9a9a;
   }
   .win-actions {
     display: flex;
@@ -323,6 +352,25 @@
   .win-btn:hover { transform: scale(1.12); }
   .win-btn:active { transform: scale(0.94); }
   .win-btn.share { color: var(--green); }
+
+  /* "Beat" banner — shown under the timer when playing a shared puzzle */
+  .beat {
+    position: fixed;
+    top: 9vh;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: var(--font);
+    font-size: clamp(0.8rem, 1.2vw, 1.2rem);
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--green);
+    z-index: 40;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  body.playing .beat.show { opacity: 1; }
 
   .toast {
     position: fixed;
@@ -348,6 +396,7 @@
   </svg>
 
   <div id="timer" class="timer">00:00</div>
+  <div id="beat" class="beat"></div>
 
   <button id="submit" class="submit">Submit</button>
 
@@ -372,8 +421,10 @@
   </main>
 
   <div id="winscreen" class="winscreen">
-    <div class="win-label">Solved in</div>
-    <div id="win-time" class="win-time">00:00</div>
+    <div id="win-label" class="win-label">Solved in</div>
+    <div id="win-value" class="win-time">00:00</div>
+    <div id="win-sub" class="win-sub"></div>
+    <div id="win-their" class="win-their"></div>
     <div class="win-actions">
       <button id="win-home" class="win-btn">Home</button>
       <button id="win-share" class="win-btn share">Share</button>
@@ -415,11 +466,15 @@ const displayValEl = displayEl.querySelector(".val");
 const keysEl = document.getElementById("keys");
 const historyEl = document.getElementById("history");
 const historyWrapEl = document.querySelector(".history-wrap");
-const winTimeEl = document.getElementById("win-time");
+const winLabelEl = document.getElementById("win-label");
+const winValueEl = document.getElementById("win-value");
+const winSubEl = document.getElementById("win-sub");
+const winTheirEl = document.getElementById("win-their");
 const winHomeBtn = document.getElementById("win-home");
 const winShareBtn = document.getElementById("win-share");
 const toastEl = document.getElementById("toast");
 const submitEl = document.getElementById("submit");
+const beatEl = document.getElementById("beat");
 
 let isRollingTarget = false;
 let currentTarget = null;
@@ -429,6 +484,10 @@ let history = [];
 // Numbers currently usable in an equation: the six drawn numbers plus any
 // results produced along the way. Each is consumed once.
 let available = [];
+let lastResult = null;     // most recent calculator answer (the "reached" value)
+let lastOutcome = null;    // this player's result for the just-finished game
+let sharedGame = null;     // when set, we're playing a puzzle someone sent us
+let borderDurationSec = 120; // how long the green bar takes to go around
 
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -671,11 +730,27 @@ function renderDisplay() {
   }
 }
 
+// Send the shown answer up into the tape and reset the main line to 00.
+function liftResult() {
+  if (expr !== "") {
+    history.push(expr);
+    renderHistory();
+  }
+  expr = "";
+  justEvaluated = false;
+  renderDisplay();
+}
+
 function pressKey(label) {
   if (label === "c") {
-    expr = "";
-    justEvaluated = false;
-    renderDisplay();
+    // On a freshly generated answer, clear lifts it up (like a second =)
+    // instead of deleting it. Mid-equation, it just wipes the line.
+    if (justEvaluated) {
+      liftResult();
+    } else {
+      expr = "";
+      renderDisplay();
+    }
     return;
   }
   if (label === "=") {
@@ -695,13 +770,7 @@ function pressKey(label) {
 function handleEquals() {
   if (justEvaluated) {
     // Second press: send the shown result up a line and start fresh at 00.
-    if (expr !== "") {
-      history.push(expr);
-      renderHistory();
-    }
-    expr = "";
-    justEvaluated = false;
-    renderDisplay();
+    liftResult();
     return;
   }
   evaluate();
@@ -751,6 +820,7 @@ function evaluate() {
   });
   available = pool.filter((e) => !e.taken).map((e) => ({ value: e.value, slotIndex: e.slotIndex }));
   available.push({ value: rounded, slotIndex: null });
+  lastResult = rounded; // the value the player has reached so far
 
   // The equation moves up into the tape; the answer drops onto the main line.
   // A second press of = sends the answer up too and resets to 00.
@@ -760,9 +830,9 @@ function evaluate() {
   justEvaluated = true;
   renderDisplay();
 
-  // Win only when the target is matched AND all six numbers have been used.
+  // Clean solve only when the target is matched AND all six numbers are used.
   const allUsed = slotUsed.every(Boolean);
-  if (currentTarget !== null && rounded === currentTarget && allUsed) showWin();
+  if (currentTarget !== null && rounded === currentTarget && allUsed) finishSolved();
 }
 
 function showError() {
@@ -775,6 +845,7 @@ function startPlaying() {
   if (document.body.classList.contains("playing")) return;
   layoutBorder();
   resetBorder();
+  borderPath.style.animationDuration = borderDurationSec + "s";
   initAvailable();
   document.body.classList.remove("time-up");
   document.body.classList.add("playing");
@@ -787,6 +858,11 @@ function backToHome() {
   resetSlots();
   history = [];
   available = [];
+  lastResult = null;
+  lastOutcome = null;
+  sharedGame = null;
+  borderDurationSec = 120;
+  beatEl.classList.remove("show");
   renderHistory();
   historyWrapEl.classList.remove("expanded");
   expr = "";
@@ -794,10 +870,107 @@ function backToHome() {
   renderDisplay();
 }
 
-/* ---------------- Win screen ---------------- */
-function showWin() {
+/* ---------------- Scoring & end of game ---------------- */
+function elapsedSeconds() {
+  return (performance.now() - startTime) / 1000;
+}
+
+// Score when you don't cleanly solve: the value you reached plus the sum of any
+// numbers you never used. Closer to the target is better.
+function computeScore() {
+  const reached = lastResult === null ? 0 : lastResult;
+  let unusedSum = 0;
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    if (!slotUsed[i] && slotValues[i] !== null) unusedSum += slotValues[i];
+  }
+  return reached + unusedSum;
+}
+
+// Make sure a freshly evaluated answer is captured in the tape before we freeze
+// the working for sharing.
+function flushAnswerToTape() {
+  if (justEvaluated && expr !== "") {
+    history.push(expr);
+    justEvaluated = false;
+  }
+}
+
+function finishSolved() {
+  flushAnswerToTape();
+  lastOutcome = { solved: true, timeSec: elapsedSeconds(), score: currentTarget, distance: 0 };
+  endGame();
+}
+
+function finishSubmitted() {
+  flushAnswerToTape();
+  const score = computeScore();
+  lastOutcome = {
+    solved: false,
+    timeSec: elapsedSeconds(),
+    score: score,
+    distance: Math.abs(score - currentTarget),
+  };
+  endGame();
+}
+
+function fmtResult(o) {
+  return o.solved ? fmtTime(o.timeSec) : String(o.score);
+}
+
+// Compare my result to the opponent's: closer to target wins; ties broken by a
+// clean solve, then by faster time.
+function verdict(me, them) {
+  if (me.distance !== them.distance) return me.distance < them.distance ? "win" : "lose";
+  if (me.solved && them.solved) {
+    if (Math.round(me.timeSec) !== Math.round(them.timeSec)) {
+      return me.timeSec < them.timeSec ? "win" : "lose";
+    }
+    return "tie";
+  }
+  if (me.solved !== them.solved) return me.solved ? "win" : "lose";
+  return "tie";
+}
+
+function endGame() {
   stopTimer();
-  winTimeEl.textContent = timerEl.textContent;
+  const me = lastOutcome;
+  winTheirEl.classList.remove("show");
+  winTheirEl.innerHTML = "";
+
+  if (sharedGame) {
+    const them = sharedGame.outcome;
+    const v = verdict(me, them);
+    winLabelEl.textContent = v === "win" ? "You win" : v === "lose" ? "You lose" : "Tie";
+    winValueEl.textContent = fmtResult(me);
+    winSubEl.textContent = me.solved
+      ? "Solved it"
+      : me.distance === 0
+      ? "Bang on " + currentTarget
+      : me.score + " · " + me.distance + " from " + currentTarget;
+
+    // Reveal the opponent's working and result.
+    const title = document.createElement("div");
+    title.className = "their-title";
+    title.textContent = "They scored " + fmtResult(them) +
+      (them.solved ? "" : (them.distance === 0 ? "" : " (" + them.distance + " away)"));
+    winTheirEl.appendChild(title);
+    (them.working || []).forEach((line) => {
+      const d = document.createElement("div");
+      d.className = "their-line";
+      d.textContent = line;
+      winTheirEl.appendChild(d);
+    });
+    winTheirEl.classList.add("show");
+  } else {
+    winLabelEl.textContent = me.solved ? "Solved in" : "Your score";
+    winValueEl.textContent = fmtResult(me);
+    winSubEl.textContent = me.solved
+      ? ""
+      : me.distance === 0
+      ? "Bang on the target!"
+      : me.distance + " from " + currentTarget;
+  }
+
   document.body.classList.add("won");
 }
 
@@ -809,21 +982,38 @@ function showToast(msg) {
   toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2000);
 }
 
+function encodeGame(payload) {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+}
+function decodeGame(code) {
+  return JSON.parse(decodeURIComponent(escape(atob(code))));
+}
+
 function sharePuzzle() {
-  if (currentTarget === null) return;
+  if (currentTarget === null || !lastOutcome) return;
+  const payload = {
+    t: currentTarget,
+    n: slotValues.slice(),
+    s: Math.max(1, Math.round(lastOutcome.timeSec)), // opponent's bar duration
+    w: history.slice(),                               // my working
+    o: {
+      solved: lastOutcome.solved,
+      timeSec: Math.round(lastOutcome.timeSec * 10) / 10,
+      score: lastOutcome.score,
+      distance: lastOutcome.distance,
+    },
+  };
   const url = new URL(location.href);
-  url.searchParams.set("t", String(currentTarget));
-  url.searchParams.set("n", slotValues.join(","));
+  url.search = "?g=" + encodeGame(payload);
   const link = url.toString();
+  const blurb = lastOutcome.solved
+    ? "Beat my time of " + fmtTime(lastOutcome.timeSec) + "!"
+    : "Beat my score of " + lastOutcome.score + "!";
   if (navigator.share) {
-    navigator.share({
-      title: "Numbers Round",
-      text: "Can you reach " + currentTarget + "?",
-      url: link,
-    }).catch(() => {});
+    navigator.share({ title: "Numbers Round", text: blurb, url: link }).catch(() => {});
   } else if (navigator.clipboard) {
     navigator.clipboard.writeText(link).then(
-      () => showToast("Puzzle link copied"),
+      () => showToast("Challenge link copied"),
       () => showToast(link)
     );
   } else {
@@ -833,16 +1023,31 @@ function sharePuzzle() {
 
 winHomeBtn.addEventListener("click", goHome);
 winShareBtn.addEventListener("click", sharePuzzle);
-submitEl.addEventListener("click", showWin);
+submitEl.addEventListener("click", finishSubmitted);
 
-// Open a shared puzzle straight into play mode (?t=803&n=50,75,25,100,50,75).
+// Open a shared puzzle straight into play mode. Modern links use ?g=<base64>;
+// the old ?t=&n= form is still accepted.
 function loadFromURL() {
   const p = new URLSearchParams(location.search);
-  const t = parseInt(p.get("t"), 10);
-  const nRaw = p.get("n");
-  if (isNaN(t) || !nRaw) return false;
-  const nums = nRaw.split(",").map((s) => parseInt(s, 10));
-  if (nums.length !== SLOT_COUNT || nums.some(isNaN)) return false;
+  let data = null;
+
+  const code = p.get("g");
+  if (code) {
+    try { data = decodeGame(code); } catch (e) { data = null; }
+  }
+  if (!data) {
+    const t = parseInt(p.get("t"), 10);
+    const nRaw = p.get("n");
+    if (!isNaN(t) && nRaw) {
+      const nums = nRaw.split(",").map((s) => parseInt(s, 10));
+      if (nums.length === SLOT_COUNT && !nums.some(isNaN)) data = { t: t, n: nums };
+    }
+  }
+  if (!data) return false;
+
+  const t = parseInt(data.t, 10);
+  const nums = (data.n || []).map(Number);
+  if (isNaN(t) || nums.length !== SLOT_COUNT || nums.some(isNaN)) return false;
 
   currentTarget = t;
   String(t).padStart(3, "0").split("").forEach((d, i) => {
@@ -856,6 +1061,32 @@ function loadFromURL() {
     down.disabled = true;
     slotValues[i] = nums[i];
   }
+
+  if (data.o) {
+    sharedGame = {
+      t: t,
+      n: nums,
+      s: data.s,
+      outcome: {
+        solved: !!data.o.solved,
+        timeSec: Number(data.o.timeSec) || 0,
+        score: Number(data.o.score),
+        distance: Number(data.o.distance),
+        working: data.w || [],
+      },
+    };
+    borderDurationSec = data.s && data.s > 0 ? data.s : 120;
+    beatEl.textContent = "Beat " +
+      (sharedGame.outcome.solved
+        ? fmtTime(sharedGame.outcome.timeSec)
+        : sharedGame.outcome.score);
+    beatEl.classList.add("show");
+  } else {
+    sharedGame = null;
+    borderDurationSec = 120;
+    beatEl.classList.remove("show");
+  }
+
   startPlaying();
   return true;
 }
