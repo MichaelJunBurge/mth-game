@@ -209,6 +209,33 @@
   .slot-num.spinning { color: #9a9a9a; }
   .slot-num.lock { animation: pop 0.26s ease; }
   .slot-num.used { opacity: 0.2; } /* dim numbers already used in an equation */
+  /* v2: drawn numbers are clickable during play */
+  body.playing .slot-num.filled:not(.used) { cursor: pointer; }
+
+  /* v2: generated-numbers row — clickable chips for results made so far */
+  .generated {
+    width: 100%;
+    margin-top: 1.6vh;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.7em;
+  }
+  .generated:empty { display: none; } /* no gap until a result exists */
+  .gen-chip {
+    background: none;
+    border: none;
+    font-family: var(--font);
+    font-size: var(--size-number);
+    font-weight: 700;
+    color: var(--ink);
+    cursor: pointer;
+    padding: 0;
+    user-select: none;
+    transition: transform 0.08s, opacity 0.12s;
+  }
+  .gen-chip:hover { transform: scale(1.12); }
+  .gen-chip:active { transform: scale(0.92); }
 
   /* Calculator — hidden until all six numbers are drawn.
      The 5 key columns are widened to span the 6 numbers' centres
@@ -461,6 +488,8 @@
 
       <div id="slots" class="slots"></div>
 
+      <div id="generated" class="generated"></div>
+
       <div class="calc">
         <div class="history-wrap">
           <div id="history" class="history"></div>
@@ -509,6 +538,7 @@ const SVGNS = "http://www.w3.org/2000/svg";
 const targetEl = document.getElementById("target");
 const reels = [...targetEl.querySelectorAll(".reel")];
 const slotsEl = document.getElementById("slots");
+const generatedEl = document.getElementById("generated");
 const timerEl = document.getElementById("timer");
 const borderSvg = document.querySelector(".border");
 const borderPath = document.getElementById("border-path");
@@ -581,6 +611,12 @@ function buildSlots() {
     const num = document.createElement("div");
     num.className = "slot-num";
     num.textContent = "00";
+    // v2: click a drawn number to insert it into the calculation line.
+    num.addEventListener("click", () => {
+      if (!document.body.classList.contains("playing")) return;
+      if (!num.classList.contains("filled") || num.classList.contains("used")) return;
+      insertValue(slotValues[i]);
+    });
 
     const down = document.createElement("button");
     down.className = "arrow down";
@@ -754,15 +790,15 @@ function stopTimer() {
 }
 
 /* ---------------- Calculator ---------------- */
+// v2: no digit pad — numbers are clicked in from the board above. Only
+// operators live on the keypad.
 const KEYS = [
-  "^", "√", "7", "8", "9",
-  "x", "÷", "4", "5", "6",
-  "-", "+", "1", "2", "3",
-  "(", ")", "c", "0", "=",
+  "+", "-", "x", "÷", "^",
+  "(", ")", "√", "c", "=",
 ];
 let expr = "";
-let justEvaluated = false; // true while the display is showing a fresh result
-let carry = null;          // previous answer carried into the current line
+let justEvaluated = false; // kept for save/restore compatibility (unused in v2)
+let carry = null;          // kept for save/restore compatibility (unused in v2)
 
 function buildKeys() {
   keysEl.innerHTML = "";
@@ -794,8 +830,6 @@ function clearAll() {
   renderHistory();
   historyWrapEl.classList.remove("expanded");
   expr = "";
-  justEvaluated = false;
-  carry = null;
   renderDisplay();
   // Fresh canvas: restore the six numbers and the available pool.
   for (let i = 0; i < SLOT_COUNT; i++) {
@@ -803,13 +837,36 @@ function clearAll() {
     slotParts(i).num.classList.remove("used");
   }
   if (document.body.classList.contains("playing")) initAvailable();
+  renderGenerated();
   saveState();
 }
 
 function initAvailable() {
-  available = slotValues.map((v, i) => ({ value: v, slotIndex: i }));
-  // The target itself is usable too, so players can work backwards from it.
-  if (currentTarget !== null) available.push({ value: currentTarget, slotIndex: null });
+  available = slotValues.map((v, i) => ({ value: v, slotIndex: i, isTarget: false }));
+  // The target itself is usable — start from it and work down to zero.
+  if (currentTarget !== null) available.push({ value: currentTarget, slotIndex: null, isTarget: true });
+  renderGenerated();
+}
+
+// Clickable chips for every result made so far — the "generated numbers" row
+// that sits just under the six numbers.
+function renderGenerated() {
+  generatedEl.innerHTML = "";
+  available.forEach((e) => {
+    if (e.slotIndex !== null || e.isTarget) return; // results only
+    const chip = document.createElement("button");
+    chip.className = "gen-chip";
+    chip.textContent = e.value;
+    chip.addEventListener("click", () => insertValue(e.value));
+    generatedEl.appendChild(chip);
+  });
+}
+
+// Append a number's value to the calculation line (clicked from the board).
+function insertValue(v) {
+  expr += String(v);
+  renderDisplay();
+  saveState();
 }
 
 function renderDisplay() {
@@ -822,64 +879,12 @@ function renderDisplay() {
   }
 }
 
-// Send the shown answer up into the tape and reset the main line to 00.
-function liftResult() {
-  if (expr !== "") {
-    history.push(expr);
-    renderHistory();
-  }
-  expr = "";
-  justEvaluated = false;
-  carry = null;
-  renderDisplay();
-}
-
 function pressKey(label) {
-  if (label === "c") {
-    // Clear wipes the current line, but never loses the previous answer:
-    //  - on a freshly shown result, lift it up (like a second =)
-    //  - if the line was started from a previous answer, push that answer up
-    //  - otherwise just wipe a from-scratch equation
-    if (justEvaluated) {
-      liftResult();
-    } else if (carry !== null) {
-      history.push(carry);
-      renderHistory();
-      carry = null;
-      expr = "";
-      renderDisplay();
-    } else {
-      expr = "";
-      renderDisplay();
-    }
-    saveState();
-    return;
-  }
-  if (label === "=") {
-    handleEquals();
-    saveState();
-    return;
-  }
-  // Typing right after a result: a number/sqrt/decimal/bracket starts a fresh
-  // entry; an operator continues from the result. Either way, remember that
-  // result so a later clear can preserve it.
-  if (justEvaluated) {
-    carry = expr;
-    if (/[0-9√(]/.test(label)) expr = "";
-    justEvaluated = false;
-  }
+  if (label === "c") { expr = ""; renderDisplay(); saveState(); return; }
+  if (label === "=") { evaluate(); saveState(); return; }
   expr += label === "√" ? "√(" : label;
   renderDisplay();
   saveState();
-}
-
-function handleEquals() {
-  if (justEvaluated) {
-    // Second press: send the shown result up a line and start fresh at 00.
-    liftResult();
-    return;
-  }
-  evaluate();
 }
 
 function evaluate() {
@@ -903,13 +908,11 @@ function evaluate() {
   const rounded = Math.round(value * 1e6) / 1e6;
 
   // Strict rule check: every number literal must be one of the still-available
-  // numbers (an original drawn number or a result made earlier). Otherwise the
-  // move is illegal and rejected.
+  // numbers (a drawn number, the target, or a result made earlier).
   const literals = (expr.match(/\d+(?:\.\d+)?/g) || []).map(Number);
-  const pool = available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, taken: false }));
+  const pool = available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: !!e.isTarget, taken: false }));
   const consumed = [];
   for (const lit of literals) {
-    // Prefer consuming an original drawn number so it fades.
     let idx = pool.findIndex((e) => !e.taken && e.value === lit && e.slotIndex !== null);
     if (idx === -1) idx = pool.findIndex((e) => !e.taken && e.value === lit);
     if (idx === -1) return showError(); // number not available -> illegal move
@@ -917,29 +920,31 @@ function evaluate() {
     consumed.push(pool[idx]);
   }
 
-  // Commit: fade used original numbers, drop consumed entries, add the result.
+  // Commit: fade used drawn numbers, drop consumed entries, add the result.
   consumed.forEach((c) => {
     if (c.slotIndex !== null) {
       slotUsed[c.slotIndex] = true;
       slotParts(c.slotIndex).num.classList.add("used");
     }
   });
-  available = pool.filter((e) => !e.taken).map((e) => ({ value: e.value, slotIndex: e.slotIndex }));
-  available.push({ value: rounded, slotIndex: null });
-  lastResult = rounded; // the value the player has reached so far
+  available = pool.filter((e) => !e.taken).map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget }));
+  available.push({ value: rounded, slotIndex: null, isTarget: false });
+  lastResult = rounded;
 
-  // The equation moves up into the tape; the answer drops onto the main line.
-  // A second press of = sends the answer up too and resets to 00.
-  history.push(expr);
+  history.push(expr);   // working line
   renderHistory();
-  expr = String(rounded);
-  justEvaluated = true;
-  carry = null; // the equation (with its inputs) is already in the tape
+  renderGenerated();    // the new result becomes a clickable chip
+  expr = "";            // clear the line for the next step
   renderDisplay();
 
-  // Clean solve only when the target is matched AND all six numbers are used.
+  // Round complete: reach the target with all six numbers used, OR work down
+  // from the target to exactly 0 (target used) with all six numbers used.
   const allUsed = slotUsed.every(Boolean);
-  if (currentTarget !== null && rounded === currentTarget && allUsed) finishSolved();
+  const targetUsed = !available.some((e) => e.isTarget);
+  if (currentTarget !== null && allUsed &&
+      (rounded === currentTarget || (rounded === 0 && targetUsed))) {
+    finishSolved();
+  }
 }
 
 function showError() {
@@ -1076,6 +1081,7 @@ function backToHome() {
   activeShareCode = null;
   beatEl.classList.remove("show");
   renderHistory();
+  renderGenerated();
   historyWrapEl.classList.remove("expanded");
   expr = "";
   justEvaluated = false;
@@ -1275,6 +1281,7 @@ function restoreState(s) {
   activeShareCode = s.shareCode || null;
 
   renderHistory();
+  renderGenerated();
   renderDisplay();
 
   if (sharedGame) {
@@ -1451,7 +1458,8 @@ function goHome() {
 
 function handleTargetPress() {
   if (document.body.classList.contains("playing")) {
-    goHome();
+    // v2: click the target to insert its value (usable once, like a number).
+    if (available.some((e) => e.isTarget)) insertValue(currentTarget);
   } else {
     rollTarget();
   }
