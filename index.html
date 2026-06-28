@@ -187,7 +187,9 @@
     overflow: hidden;
     transition: transform 0.08s, opacity 0.5s ease, max-height 0.8s ease-in-out, padding 0.8s ease-in-out;
   }
-  .arrow svg { width: var(--size-ui); height: auto; display: block; }
+  /* Explicit height (viewBox is 16x12 -> 0.75 ratio). Avoids the flaky
+     intrinsic-sizing of height:auto on mobile, which could render 0-height. */
+  .arrow svg { width: var(--size-ui); height: calc(var(--size-ui) * 0.75); display: block; }
   .arrow:hover { transform: scale(1.25); }
   .arrow:active { transform: scale(0.9); }
   .arrow:disabled { opacity: 0.2; cursor: default; transform: none; } /* non-clickable */
@@ -524,6 +526,8 @@ const submitEl = document.getElementById("submit");
 const beatEl = document.getElementById("beat");
 
 let isRollingTarget = false;
+let rollTimers = []; // reel spinner intervals + stagger timeouts, so they can be cancelled
+let drawTimers = []; // number-draw spin timers, cancellable on leaving
 let currentTarget = null;
 const slotValues = new Array(SLOT_COUNT).fill(null);
 const slotUsed = new Array(SLOT_COUNT).fill(false);
@@ -545,6 +549,8 @@ function randInt(min, max) {
 function chevron(dir) {
   const svg = document.createElementNS(SVGNS, "svg");
   svg.setAttribute("viewBox", "0 0 16 12");
+  svg.setAttribute("width", "16");  // intrinsic fallback; CSS sizes it
+  svg.setAttribute("height", "12");
   const p = document.createElementNS(SVGNS, "path");
   p.setAttribute("d", dir === "up" ? "M2 9 L8 3 L14 9" : "M2 3 L8 9 L14 3");
   p.setAttribute("fill", "none");
@@ -643,8 +649,9 @@ function drawInto(i, size) {
   const spin = setInterval(() => {
     num.textContent = size === "large" ? randInt(10, 99) : randInt(1, 9);
   }, 45);
+  drawTimers.push(spin);
 
-  setTimeout(() => {
+  drawTimers.push(setTimeout(() => {
     clearInterval(spin);
     num.textContent = value;
     num.classList.remove("spinning");
@@ -655,7 +662,12 @@ function drawInto(i, size) {
     // Only begin once BOTH the target and all six numbers exist.
     if (countFilled() === SLOT_COUNT && currentTarget !== null) beginEntrance();
     else saveState(); // persist selection progress
-  }, 420);
+  }, 420));
+}
+
+function stopDraws() {
+  drawTimers.forEach((id) => { clearInterval(id); clearTimeout(id); });
+  drawTimers = [];
 }
 
 /* ---------------- Green border geometry (CSS drives the motion) ---------------- */
@@ -1045,6 +1057,8 @@ function beginEntrance() {
 function backToHome() {
   entranceTimers.forEach(clearTimeout);
   entranceTimers = [];
+  stopRoll();
+  stopDraws();
   document.body.classList.remove("playing", "won", "time-up", "entering", "raised");
   resetArrows();
   resetCalc();
@@ -1440,11 +1454,16 @@ function handleTargetPress() {
   }
 }
 
+function stopRoll() {
+  rollTimers.forEach((id) => { clearInterval(id); clearTimeout(id); });
+  rollTimers = [];
+  isRollingTarget = false;
+}
+
 function rollTarget() {
   if (isRollingTarget) return;
+  backToHome();          // clean slate (also stops any prior roll)
   isRollingTarget = true;
-
-  backToHome();
 
   currentTarget = randInt(100, 999);
   const digits = String(currentTarget).split("").map(Number);
@@ -1452,22 +1471,25 @@ function rollTarget() {
   const spinners = reels.map((r) => {
     r.classList.add("spinning");
     r.classList.remove("lock");
-    return setInterval(() => { r.textContent = randInt(0, 9); }, 45);
+    const id = setInterval(() => { r.textContent = randInt(0, 9); }, 45);
+    rollTimers.push(id);
+    return id;
   });
 
   const stopDelays = [650, 1050, 1450];
   reels.forEach((r, i) => {
-    setTimeout(() => {
+    rollTimers.push(setTimeout(() => {
       clearInterval(spinners[i]);
       r.textContent = digits[i];
       r.classList.remove("spinning");
       r.classList.add("lock");
       if (i === reels.length - 1) {
         isRollingTarget = false;
+        rollTimers = [];
         setArrowsEnabled(true); // numbers can be drawn now the target exists
         saveState(); // persist the rolled target
       }
-    }, stopDelays[i]);
+    }, stopDelays[i]));
   });
 }
 
