@@ -10,8 +10,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet" />
 <style>
   :root {
+    --bg: #ffffff;
     --ink: #111;
     --grey: #c9c9c9;
+    --dim: #444;            /* spinning reels etc. — readable on the bg */
     --green: #1ec96f;
     --red: #e8503a;
     --font: "Roboto Mono", ui-monospace, "Courier New", monospace;
@@ -26,6 +28,14 @@
     /* Opacity convention: anything you cannot click sits at 20%. */
     --muted: rgba(17, 17, 17, 0.2);
   }
+  /* Dark theme */
+  body.dark {
+    --bg: #14161a;
+    --ink: #ececec;
+    --grey: #5a5e66;
+    --dim: #b0b0b0;
+    --muted: rgba(236, 236, 236, 0.25);
+  }
   @media (min-width: 768px) {
     :root { --app-w: min(33vw, 310px); }         /* desktop: ~a third, capped */
   }
@@ -37,13 +47,14 @@
     overflow: hidden;
     overscroll-behavior: none;
   }
-  html { background: #ffffff; }
+  html { background: var(--bg); }
   body {
     margin: 0;
-    background: #ffffff;
+    background: var(--bg);
     color: var(--ink);
     font-family: var(--font);
     -webkit-font-smoothing: antialiased;
+    transition: background 0.25s ease, color 0.25s ease;
   }
 
   /* Green perimeter indicator — one continuous bar, browser-animated */
@@ -80,13 +91,12 @@
     to   { stroke-dashoffset: 0; }     /* full, filling clockwise */
   }
 
-  /* Timer */
-  /* Timer — non-clickable, so it sits at the muted 20%. */
+  /* Timer — sits muted at 20%; clickable during play to open the menu. */
   .timer {
     position: fixed;
     top: 5vh;
-    left: 0;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
     text-align: center;
     font-size: var(--size-ui);
     font-weight: 700;
@@ -98,6 +108,8 @@
     transition: opacity 0.3s;
   }
   body.entering .timer, body.playing .timer { opacity: 1; }
+  body.playing .timer { pointer-events: auto; cursor: pointer; }
+  body.playing .timer:hover { color: var(--ink); }
 
   /* Submit — mirrors the timer at the bottom. Sits muted (like the timer) and
      brightens to full black on hover (no scale animation). */
@@ -154,7 +166,7 @@
     font-size: var(--size-target);
     font-weight: 700;
   }
-  .reel.spinning { color: #444; }
+  .reel.spinning { color: var(--dim); }
   .reel.lock { animation: pop 0.28s ease; }
   @keyframes pop {
     0%   { transform: translateY(-6px) scale(1.12); }
@@ -293,7 +305,7 @@
     pointer-events: none;
     /* white at the top fading down toward the main line — older lines fade out,
        hinting there's more to reveal by tapping */
-    background: linear-gradient(to bottom, #fff 0%, #fff 4%, rgba(255, 255, 255, 0) 75%);
+    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 4%, transparent 75%);
   }
   .history:not(:empty) { cursor: pointer; }
   /* Tapping the tape drops the fade and reveals every line in full. */
@@ -361,7 +373,7 @@
     position: fixed;
     inset: 0;
     z-index: 60;
-    background: #ffffff;
+    background: var(--bg);
     display: none;
     flex-direction: column;
     align-items: center;
@@ -456,7 +468,7 @@
     left: 50%;
     transform: translateX(-50%);
     background: var(--ink);
-    color: #fff;
+    color: var(--bg);
     font-size: clamp(0.8rem, 1.2vw, 1.1rem);
     padding: 0.6em 1.2em;
     border-radius: 6px;
@@ -466,6 +478,66 @@
     z-index: 70;
   }
   .toast.show { opacity: 1; }
+
+  /* Pause menu — opened by tapping the timer; blocks the whole screen. */
+  .menu {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: var(--bg);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4vh;
+  }
+  body.menu-open .menu { display: flex; }
+  .menu-x {
+    position: absolute;
+    top: 4vh;
+    right: 6vw;
+    background: none;
+    border: none;
+    font-family: var(--font);
+    font-size: calc(var(--size-ui) * 1.6);
+    font-weight: 700;
+    line-height: 1;
+    color: var(--ink);
+    cursor: pointer;
+    padding: 0.1em 0.3em;
+    transition: transform 0.08s;
+  }
+  .menu-x:hover { transform: scale(1.12); }
+  .menu-view {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 4vh;
+  }
+  .menu:not(.help-open) .menu-main { display: flex; }
+  .menu.help-open .menu-help { display: flex; }
+  .menu-btn {
+    background: none;
+    border: none;
+    font-family: var(--font);
+    font-size: var(--size-ui);
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--ink);
+    cursor: pointer;
+    padding: 0.2em 0.4em;
+    transition: transform 0.08s;
+  }
+  .menu-btn:hover { transform: scale(1.12); }
+  .menu-help { max-width: 80vw; gap: 3vh; }
+  .help-text {
+    font-size: var(--size-ui);
+    font-weight: 400;
+    line-height: 1.6;
+    color: var(--ink);
+    text-align: center;
+  }
+  .help-text b { font-weight: 700; }
 </style>
 </head>
 <body>
@@ -512,6 +584,24 @@
   </div>
 
   <div id="toast" class="toast"></div>
+
+  <div id="menu" class="menu">
+    <button id="menu-close" class="menu-x" aria-label="Close menu">&times;</button>
+    <div class="menu-view menu-main">
+      <button id="menu-home" class="menu-btn">Home</button>
+      <button id="menu-help" class="menu-btn">Help</button>
+      <button id="menu-theme" class="menu-btn">Dark mode</button>
+    </div>
+    <div class="menu-view menu-help">
+      <div class="help-text">
+        <p>Reach the <b>target</b>, or work down to <b>0</b>, using each of the six numbers once.</p>
+        <p>Tap a number (or the target) to add it to your line, then a math symbol, then another number.</p>
+        <p>Each new number you make becomes a chip you can reuse.</p>
+        <p>&#9003; deletes your last move &middot; c clears the line &middot; double-tap c wipes everything.</p>
+      </div>
+      <button id="menu-help-back" class="menu-btn">Back</button>
+    </div>
+  </div>
 
 <script>
 "use strict";
@@ -744,6 +834,7 @@ function resetBorder() {
   borderPath.style.stroke = "";
   borderPath.style.strokeDashoffset = "";
   borderPath.style.animationDelay = "";
+  borderPath.style.animationPlayState = "";
 }
 // Start (or resume, via delaySec) the green drain — full to empty, clockwise.
 function startBorderDrain(delaySec) {
@@ -791,14 +882,16 @@ function stopTimer() {
 
 /* ---------------- Calculator ---------------- */
 // v2: no digit pad — numbers are clicked in from the board above. Only
-// operators live on the keypad.
+// operators live on the keypad. "⌫" deletes the last move.
 const KEYS = [
   "+", "-", "x", "÷", "^",
   "(", ")", "√", "c", "=",
+  "⌫",
 ];
 let expr = "";
 let justEvaluated = false; // kept for save/restore compatibility (unused in v2)
 let carry = null;          // kept for save/restore compatibility (unused in v2)
+let undoStack = [];        // expr snapshots so ⌫ can delete the last move
 
 function buildKeys() {
   keysEl.innerHTML = "";
@@ -807,6 +900,7 @@ function buildKeys() {
     btn.className = "key";
     if (label === "c") btn.classList.add("clear");
     if (label === "=") btn.classList.add("equals");
+    if (label === "⌫") btn.style.gridColumn = "3"; // delete sits centred below
     btn.textContent = label;
     btn.addEventListener("click", () => pressKey(label));
     // Double-clicking the red clear wipes the whole tape back to blank.
@@ -830,6 +924,7 @@ function clearAll() {
   renderHistory();
   historyWrapEl.classList.remove("expanded");
   expr = "";
+  undoStack = [];
   renderDisplay();
   // Fresh canvas: restore the six numbers and the available pool.
   for (let i = 0; i < SLOT_COUNT; i++) {
@@ -862,9 +957,26 @@ function renderGenerated() {
   });
 }
 
+// A number can only follow the start, an operator, or an open bracket — never
+// straight after another number (that would just glue the digits together).
+function canInsertNumber() {
+  if (expr === "") return true;
+  return /[+\-x÷^(]/.test(expr[expr.length - 1]);
+}
+
 // Append a number's value to the calculation line (clicked from the board).
 function insertValue(v) {
+  if (!canInsertNumber()) return; // must put an operator between two numbers
+  undoStack.push(expr);
   expr += String(v);
+  renderDisplay();
+  saveState();
+}
+
+// Delete the most recent move (number or operator).
+function undo() {
+  if (undoStack.length === 0) return;
+  expr = undoStack.pop();
   renderDisplay();
   saveState();
 }
@@ -880,8 +992,10 @@ function renderDisplay() {
 }
 
 function pressKey(label) {
-  if (label === "c") { expr = ""; renderDisplay(); saveState(); return; }
+  if (label === "⌫") { undo(); return; }
+  if (label === "c") { expr = ""; undoStack = []; renderDisplay(); saveState(); return; }
   if (label === "=") { evaluate(); saveState(); return; }
+  undoStack.push(expr);
   expr += label === "√" ? "√(" : label;
   renderDisplay();
   saveState();
@@ -935,6 +1049,7 @@ function evaluate() {
   renderHistory();
   renderGenerated();    // the new result becomes a clickable chip
   expr = "";            // clear the line for the next step
+  undoStack = [];
   renderDisplay();
 
   // Round complete: reach the target with all six numbers used, OR work down
@@ -1084,6 +1199,7 @@ function backToHome() {
   renderGenerated();
   historyWrapEl.classList.remove("expanded");
   expr = "";
+  undoStack = [];
   justEvaluated = false;
   carry = null;
   renderDisplay();
@@ -1378,6 +1494,47 @@ winHomeBtn.addEventListener("click", goHome);
 winShareBtn.addEventListener("click", sharePuzzle);
 submitEl.addEventListener("click", finishSubmitted);
 
+/* ---------------- Pause menu + theme ---------------- */
+const menuEl = document.getElementById("menu");
+const THEME_KEY = "numbersRound.theme.v2";
+
+function applyTheme(theme) {
+  const dark = theme === "dark";
+  document.body.classList.toggle("dark", dark);
+  document.getElementById("menu-theme").textContent = dark ? "Light mode" : "Dark mode";
+}
+function toggleTheme() {
+  const dark = !document.body.classList.contains("dark");
+  applyTheme(dark ? "dark" : "light");
+  try { localStorage.setItem(THEME_KEY, dark ? "dark" : "light"); } catch (e) {}
+}
+
+let menuPausedElapsed = null;
+function openMenu() {
+  if (!document.body.classList.contains("playing")) return;
+  menuPausedElapsed = elapsedSeconds(); // freeze the clock
+  stopTimer();
+  borderPath.style.animationPlayState = "paused";
+  menuEl.classList.remove("help-open");
+  document.body.classList.add("menu-open");
+}
+function closeMenu(resume) {
+  document.body.classList.remove("menu-open");
+  if (resume && menuPausedElapsed !== null && document.body.classList.contains("playing")) {
+    startEpoch = Date.now() - menuPausedElapsed * 1000; // resume from the frozen time
+    runTimerLoop();
+    borderPath.style.animationPlayState = "running";
+  }
+  menuPausedElapsed = null;
+}
+
+timerEl.addEventListener("click", openMenu);
+document.getElementById("menu-close").addEventListener("click", () => closeMenu(true));
+document.getElementById("menu-home").addEventListener("click", () => { closeMenu(false); goHome(); });
+document.getElementById("menu-help").addEventListener("click", () => menuEl.classList.add("help-open"));
+document.getElementById("menu-help-back").addEventListener("click", () => menuEl.classList.remove("help-open"));
+document.getElementById("menu-theme").addEventListener("click", toggleTheme);
+
 // Open a shared puzzle straight into play mode. Modern links use ?g=<base64>;
 // the old ?t=&n= form is still accepted.
 function loadFromURL() {
@@ -1526,6 +1683,7 @@ renderDisplay();
 renderHistory();
 setArrowsEnabled(false); // can't draw numbers until a target is generated
 layoutBorder();
+applyTheme(localStorage.getItem(THEME_KEY) || "light");
 
 // On load: restore an in-progress game unless the URL points at a *different*
 // shared puzzle (a fresh challenge link). Otherwise open whatever the URL has.
