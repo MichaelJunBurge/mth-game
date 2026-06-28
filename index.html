@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="color-scheme" content="light" />
-<title>Numbers Round</title>
+<title>mth game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet" />
@@ -57,7 +57,7 @@
     opacity: 0;
     transition: opacity 0.3s;
   }
-  body.playing .border { opacity: 1; }
+  body.entering .border, body.playing .border { opacity: 1; }
   .border path {
     fill: none;
     stroke: var(--green);
@@ -65,17 +65,14 @@
     stroke-linejoin: round;
     stroke-linecap: round;
     stroke-dasharray: 1000 1000; /* pathLength=1000 -> one full lap */
-    stroke-dashoffset: 0;
+    stroke-dashoffset: 0;        /* full ring by default */
     will-change: stroke-dashoffset;
   }
-  /* Lap one: green grows from nothing to the full perimeter over a minute.
-     When that lap finishes the border locks to solid red and stops moving
-     (handled in JS on animationend). */
-  .border path { stroke: var(--green); }
-  body.playing .border path { animation: borderGrow 120s linear forwards; }
-  @keyframes borderGrow {
-    from { stroke-dashoffset: 1000; } /* empty */
-    to   { stroke-dashoffset: 0; }    /* full perimeter */
+  /* The ring starts full and drains away over the round (animation applied in
+     JS once the calculator appears). On empty it locks to solid red. */
+  @keyframes borderDrain {
+    from { stroke-dashoffset: 0; }    /* full perimeter */
+    to   { stroke-dashoffset: 1000; } /* empty */
   }
 
   /* Timer */
@@ -95,10 +92,10 @@
     opacity: 0;
     transition: opacity 0.3s;
   }
-  body.playing .timer { opacity: 1; }
+  body.entering .timer, body.playing .timer { opacity: 1; }
 
-  /* Submit — clickable, so full black; mirrors the timer at the bottom and is
-     visible the whole time you're playing. */
+  /* Submit — mirrors the timer at the bottom. Sits muted (like the timer) and
+     brightens to full black on hover (no scale animation). */
   .submit {
     position: fixed;
     bottom: 5vh;
@@ -116,11 +113,10 @@
     z-index: 40;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.3s, transform 0.08s;
+    transition: opacity 0.3s;
   }
-  body.playing .submit { opacity: 1; pointer-events: auto; }
-  .submit:hover { transform: scale(1.12); }
-  .submit:active { transform: scale(0.94); }
+  body.playing .submit { opacity: 0.2; pointer-events: auto; }
+  body.playing .submit:hover { opacity: 1; }
 
   .stage {
     min-height: 100vh;
@@ -129,13 +125,13 @@
     justify-content: center;
     padding: 24px;
   }
-  /* One centered column whose width is the shared --app-w. */
+  /* One centered column whose width is the shared --app-w. Spacing is on the
+     children (not a flex gap) so the collapsed calculator adds no gap on home. */
   .content {
     width: var(--app-w);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 3vh;
   }
 
   /* Target */
@@ -164,6 +160,7 @@
   /* Number slots — 6-column grid, full content width */
   .slots {
     width: 100%;
+    margin-top: 3vh; /* space below the target */
     display: grid;
     grid-template-columns: repeat(6, 1fr);
   }
@@ -187,6 +184,7 @@
   .arrow:hover { transform: scale(1.25); }
   .arrow:active { transform: scale(0.9); }
   .arrow:disabled { opacity: 0.2; cursor: default; transform: none; } /* non-clickable */
+  body.entering .arrow,
   body.playing .arrow { display: none; } /* arrows gone once all six are picked */
   .slot-num {
     font-size: var(--size-number);
@@ -205,12 +203,22 @@
      (1/12 .. 11/12), so the outer columns sit under the outer numbers. */
   .calc {
     width: 100%;
-    margin-top: 0;
+    margin-top: 1.5vh;
     display: none;
     flex-direction: column;
     gap: 1.1em;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 0.55s ease, opacity 0.4s ease;
   }
+  /* Entrance: calc joins the flow collapsed, expands (raised) to push the
+     numbers up, then fades in (playing). */
+  body.entering .calc,
   body.playing .calc { display: flex; }
+  body.raised .calc,
+  body.playing .calc { max-height: 80vh; }
+  body.playing .calc { opacity: 1; }
 
   /* Equation tape: about three faded previous lines sit above the input line,
      with a white gradient fading the oldest toward the top. */
@@ -243,8 +251,9 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    /* fade only the top sliver so three lines stay clearly readable */
-    background: linear-gradient(to bottom, #fff 0%, #fff 2%, rgba(255, 255, 255, 0) 22%);
+    /* white at the top fading down toward the main line — older lines fade out,
+       hinting there's more to reveal by tapping */
+    background: linear-gradient(to bottom, #fff 0%, #fff 4%, rgba(255, 255, 255, 0) 75%);
   }
   .history:not(:empty) { cursor: pointer; }
   /* Tapping the tape drops the fade and reveals every line in full. */
@@ -632,7 +641,7 @@ function drawInto(i, size) {
     up.disabled = true;
     down.disabled = true;
     // Only begin once BOTH the target and all six numbers exist.
-    if (countFilled() === SLOT_COUNT && currentTarget !== null) startPlaying();
+    if (countFilled() === SLOT_COUNT && currentTarget !== null) beginEntrance();
     else saveState(); // persist selection progress
   }, 420);
 }
@@ -654,19 +663,26 @@ function layoutBorder() {
 }
 window.addEventListener("resize", layoutBorder);
 
-// When the green lap finishes growing, lock the border to a solid red ring
-// with no further motion.
+// When the green ring finishes draining, lock it to a solid red ring.
 borderPath.addEventListener("animationend", () => {
   borderPath.style.animation = "none";
   borderPath.style.stroke = "var(--red)";
   borderPath.style.strokeDashoffset = "0";
-  document.body.classList.add("time-up"); // reveal the submit button
+  document.body.classList.add("time-up");
 });
 function resetBorder() {
+  // back to the full, static green ring
   borderPath.style.animation = "";
   borderPath.style.stroke = "";
   borderPath.style.strokeDashoffset = "";
   borderPath.style.animationDelay = "";
+}
+// Start (or resume, via delaySec) the drain from full to empty.
+function startBorderDrain(delaySec) {
+  borderPath.style.stroke = "";
+  borderPath.style.strokeDashoffset = "";
+  borderPath.style.animation = "borderDrain " + borderDurationSec + "s linear forwards";
+  borderPath.style.animationDelay = "-" + (delaySec || 0) + "s";
 }
 
 /* ---------------- Timer text ---------------- */
@@ -892,20 +908,52 @@ function showError() {
 }
 
 /* ---------------- Round flow ---------------- */
+// Immediate play — no entrance (used by shared links and refresh-restore).
 function startPlaying() {
   if (document.body.classList.contains("playing")) return;
   layoutBorder();
   resetBorder();
-  borderPath.style.animationDuration = borderDurationSec + "s";
   initAvailable();
-  document.body.classList.remove("time-up");
+  document.body.classList.remove("time-up", "entering", "raised");
   document.body.classList.add("playing");
   startTimer();
+  startBorderDrain(0);
   saveState();
 }
 
+// Animated entrance from home once all six numbers are drawn:
+//  1. full green ring fades in + timer reads 00:00, hold ~1s
+//  2. target + numbers rise as the calculator space opens
+//  3. calculator + submit fade in
+//  4. timer starts and the ring begins draining
+let entranceTimers = [];
+function beginEntrance() {
+  if (document.body.classList.contains("playing") ||
+      document.body.classList.contains("entering")) return;
+  initAvailable();
+  layoutBorder();
+  resetBorder();                 // full, static green ring
+  timerEl.textContent = "00:00"; // shown but not counting yet
+  document.body.classList.remove("time-up");
+  document.body.classList.add("entering");
+  saveState();
+  entranceTimers.forEach(clearTimeout);
+  entranceTimers = [];
+  entranceTimers.push(setTimeout(() => {
+    document.body.classList.add("raised");       // numbers move up
+    entranceTimers.push(setTimeout(() => {
+      document.body.classList.add("playing");    // calc + submit appear
+      startTimer();                              // timer starts now
+      startBorderDrain(0);                       // ring begins draining
+      saveState();
+    }, 650));
+  }, 1000));
+}
+
 function backToHome() {
-  document.body.classList.remove("playing", "won", "time-up");
+  entranceTimers.forEach(clearTimeout);
+  entranceTimers = [];
+  document.body.classList.remove("playing", "won", "time-up", "entering", "raised");
   stopTimer();
   resetSlots();
   history = [];
@@ -1133,12 +1181,7 @@ function restoreState(s) {
     layoutBorder();
     resetBorder();
     const elapsed = (Date.now() - startEpoch) / 1000;
-    borderPath.style.animationDuration = borderDurationSec + "s";
-    if (elapsed < borderDurationSec) {
-      // Resume the green bar partway through via a negative delay.
-      borderPath.style.animationDelay = "-" + elapsed + "s";
-    }
-    document.body.classList.remove("time-up");
+    document.body.classList.remove("time-up", "entering", "raised");
     document.body.classList.add("playing");
     runTimerLoop();
     if (elapsed >= borderDurationSec) {
@@ -1147,11 +1190,19 @@ function restoreState(s) {
       borderPath.style.stroke = "var(--red)";
       borderPath.style.strokeDashoffset = "0";
       document.body.classList.add("time-up");
+    } else {
+      // Resume the drain partway through.
+      startBorderDrain(elapsed);
     }
     return true;
   }
 
-  // phase === "select": target rolled, some numbers maybe drawn, still picking.
+  // phase === "select": target rolled, numbers maybe drawn, still picking.
+  // If all six are already filled, go straight into play (no entrance).
+  if (slotValues.every((v) => v !== null)) {
+    startPlaying();
+    return true;
+  }
   setArrowsEnabled(true);
   return true;
 }
@@ -1192,7 +1243,7 @@ function sharePuzzle() {
     ? "Beat my time of " + fmtTime(lastOutcome.timeSec) + "!"
     : "Beat my score of " + lastOutcome.score + "!";
   if (navigator.share) {
-    navigator.share({ title: "Numbers Round", text: blurb, url: link }).catch(() => {});
+    navigator.share({ title: "mth game", text: blurb, url: link }).catch(() => {});
   } else if (navigator.clipboard) {
     navigator.clipboard.writeText(link).then(
       () => showToast("Challenge link copied"),
