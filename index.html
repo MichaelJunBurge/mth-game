@@ -183,14 +183,20 @@
     cursor: pointer;
     user-select: none;
     display: flex;
-    transition: transform 0.08s, opacity 0.12s;
+    max-height: 4em;
+    overflow: hidden;
+    transition: transform 0.08s, opacity 0.5s ease, max-height 0.8s ease, padding 0.8s ease;
   }
   .arrow svg { width: var(--size-ui); height: auto; display: block; }
   .arrow:hover { transform: scale(1.25); }
   .arrow:active { transform: scale(0.9); }
   .arrow:disabled { opacity: 0.2; cursor: default; transform: none; } /* non-clickable */
+  /* Entrance: arrows fade out first (numbers stay put), then collapse as the
+     numbers rise, so nothing snaps. */
   body.entering .arrow,
-  body.playing .arrow { display: none; } /* arrows gone once all six are picked */
+  body.playing .arrow { opacity: 0; pointer-events: none; }
+  body.raised .arrow,
+  body.playing .arrow { max-height: 0; padding-top: 0; padding-bottom: 0; }
   .slot-num {
     font-size: var(--size-number);
     font-weight: 700;
@@ -215,8 +221,8 @@
     max-height: 0;
     opacity: 0;
     overflow: hidden;
-    /* 3s rise (numbers slide up into position), then a gentle fade-in */
-    transition: max-height 3s ease-in-out, opacity 0.5s ease;
+    /* numbers slide up (max-height), then the calc fades in (opacity) */
+    transition: max-height 0.8s ease-in-out, opacity 0.5s ease;
   }
   /* Entrance: calc joins the flow collapsed, expands (raised) to push the
      numbers up, then fades in (playing). */
@@ -669,10 +675,8 @@ function layoutBorder() {
 }
 window.addEventListener("resize", layoutBorder);
 
-const RED_FILL_SEC = 2; // red ring grows around once over this long
-
-// When the green ring finishes draining, a red ring grows for one rotation;
-// when that finishes, it stays solid red.
+// When the green ring finishes draining, a red ring grows for one rotation
+// (same duration as the green lap); when that finishes, it stays solid red.
 borderPath.addEventListener("animationend", (e) => {
   if (e.animationName === "borderDrain") {
     document.body.classList.add("time-up");
@@ -697,12 +701,13 @@ function startBorderDrain(delaySec) {
   borderPath.style.animation = "borderDrain " + borderDurationSec + "s linear forwards";
   borderPath.style.animationDelay = "-" + (delaySec || 0) + "s";
 }
-// Red ring grows clockwise for one rotation, then locks solid.
+// Red ring grows clockwise for one rotation (same duration as the green lap),
+// then locks solid.
 function startRedFill() {
   borderPath.style.stroke = "var(--red)";
   borderPath.style.strokeDashoffset = "";
   borderPath.style.animationDelay = "0s";
-  borderPath.style.animation = "borderFill " + RED_FILL_SEC + "s linear forwards";
+  borderPath.style.animation = "borderFill " + borderDurationSec + "s linear forwards";
 }
 
 /* ---------------- Timer text ---------------- */
@@ -959,16 +964,20 @@ function beginEntrance() {
   saveState();
   entranceTimers.forEach(clearTimeout);
   entranceTimers = [];
-  // brief hold so the ring + 00:00 register, then a slow 3s rise, then reveal
+  const HOLD_MS = 3000;  // hold the full ring + 00:00 with arrows faded out
+  const RISE_MS = 800;   // numbers slide up into position
+  const FADE_MS = 500;   // calculator fades in
   entranceTimers.push(setTimeout(() => {
-    document.body.classList.add("raised");       // numbers slide up over 3s
+    document.body.classList.add("raised");         // numbers rise
     entranceTimers.push(setTimeout(() => {
-      document.body.classList.add("playing");    // calc + submit fade in
-      startTimer();                              // timer starts now
-      startBorderDrain(0);                       // ring begins draining
-      saveState();
-    }, 3000));
-  }, 500));
+      document.body.classList.add("playing");      // calc fades in immediately
+      entranceTimers.push(setTimeout(() => {
+        startTimer();                              // timer starts after the fade
+        startBorderDrain(0);                       // ring begins draining
+        saveState();
+      }, FADE_MS));
+    }, RISE_MS));
+  }, HOLD_MS));
 }
 
 function backToHome() {
