@@ -15,6 +15,19 @@
     --green: #1ec96f;
     --red: #e8503a;
     --font: "Roboto Mono", ui-monospace, "Courier New", monospace;
+
+    /* One width drives the column AND every text size, so they scale together
+       and stop growing once the column is capped. */
+    --app-w: min(60vw, 310px);                  /* mobile: ~60% of the screen */
+    --size-target: calc(var(--app-w) * 0.15);   /* the 000 target — hero size */
+    --size-number: calc(var(--app-w) * 0.066);  /* six numbers + main calc line */
+    --size-ui: calc(var(--app-w) * 0.05);        /* timer, keys, tape, buttons */
+
+    /* Opacity convention: anything you cannot click sits at 20%. */
+    --muted: rgba(17, 17, 17, 0.2);
+  }
+  @media (min-width: 768px) {
+    :root { --app-w: min(33vw, 310px); }         /* desktop: ~a third, capped */
   }
   * { box-sizing: border-box; }
   /* Lock the viewport: the page itself never scrolls or rubber-bands. Only the
@@ -66,16 +79,17 @@
   }
 
   /* Timer */
+  /* Timer — non-clickable, so it sits at the muted 20%. */
   .timer {
     position: fixed;
     top: 5vh;
     left: 0;
     right: 0;
     text-align: center;
-    font-size: clamp(0.9rem, 1.4vw, 1.4rem);
+    font-size: var(--size-ui);
     font-weight: 700;
     letter-spacing: 0.15em;
-    color: var(--grey);
+    color: var(--muted);
     z-index: 40;
     pointer-events: none;
     opacity: 0;
@@ -83,8 +97,8 @@
   }
   body.playing .timer { opacity: 1; }
 
-  /* Submit — same look as the timer, mirrored to the bottom. Appears only once
-     time is up (the red border has finished). */
+  /* Submit — clickable, so full black; mirrors the timer at the bottom and is
+     visible the whole time you're playing. */
   .submit {
     position: fixed;
     bottom: 5vh;
@@ -92,10 +106,10 @@
     right: 0;
     text-align: center;
     font-family: var(--font);
-    font-size: clamp(0.9rem, 1.4vw, 1.4rem);
+    font-size: var(--size-ui);
     font-weight: 700;
     letter-spacing: 0.15em;
-    color: var(--grey);
+    color: var(--ink);
     background: none;
     border: none;
     cursor: pointer;
@@ -104,7 +118,7 @@
     pointer-events: none;
     transition: opacity 0.3s, transform 0.08s;
   }
-  body.playing.time-up .submit { opacity: 1; pointer-events: auto; }
+  body.playing .submit { opacity: 1; pointer-events: auto; }
   .submit:hover { transform: scale(1.12); }
   .submit:active { transform: scale(0.94); }
 
@@ -115,21 +129,13 @@
     justify-content: center;
     padding: 24px;
   }
-  /* One centered column. Mobile takes ~60% of the width; desktop ~a third but
-     capped by max-width so it stops growing on wide screens. Inner elements
-     are sized in cqw (container width) so they scale with this column, not the
-     raw viewport. */
+  /* One centered column whose width is the shared --app-w. */
   .content {
-    width: 60vw;
-    max-width: 310px;
-    container-type: inline-size;
+    width: var(--app-w);
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 5vh;
-  }
-  @media (min-width: 768px) {
-    .content { width: 33vw; }
+    gap: 3vh;
   }
 
   /* Target */
@@ -144,7 +150,7 @@
     display: inline-block;
     width: 0.62em;
     text-align: center;
-    font-size: clamp(2rem, 15cqw, 4.6rem);
+    font-size: var(--size-target);
     font-weight: 700;
   }
   .reel.spinning { color: #444; }
@@ -177,17 +183,17 @@
     display: flex;
     transition: transform 0.08s, opacity 0.12s;
   }
-  .arrow svg { width: clamp(0.7rem, 4cqw, 1.2rem); height: auto; display: block; }
+  .arrow svg { width: var(--size-ui); height: auto; display: block; }
   .arrow:hover { transform: scale(1.25); }
   .arrow:active { transform: scale(0.9); }
-  .arrow:disabled { opacity: 0.18; cursor: default; transform: none; }
+  .arrow:disabled { opacity: 0.2; cursor: default; transform: none; } /* non-clickable */
   body.playing .arrow { display: none; } /* arrows gone once all six are picked */
   .slot-num {
-    font-size: clamp(0.85rem, 6cqw, 1.7rem);
+    font-size: var(--size-number);
     font-weight: 700;
-    color: var(--grey);
+    color: var(--muted); /* empty placeholder — not clickable */
     text-align: center;
-    transition: color 0.15s;
+    transition: color 0.15s, opacity 0.15s;
   }
   .slot-num.filled { color: var(--ink); }
   .slot-num.spinning { color: #9a9a9a; }
@@ -199,15 +205,15 @@
      (1/12 .. 11/12), so the outer columns sit under the outer numbers. */
   .calc {
     width: 100%;
-    margin-top: 1vh;
+    margin-top: 0;
     display: none;
     flex-direction: column;
-    gap: 1.4em;
+    gap: 1.1em;
   }
   body.playing .calc { display: flex; }
 
-  /* Equation tape: faded previous lines above the current input line, with a
-     white gradient that fades the oldest lines toward the top. */
+  /* Equation tape: about three faded previous lines sit above the input line,
+     with a white gradient fading the oldest toward the top. */
   .history-wrap {
     position: relative;
     width: 100%;
@@ -217,14 +223,17 @@
     flex-direction: column;
     justify-content: flex-end;
     align-items: flex-end;
-    gap: 0.4em;
-    height: 4vh;
+    gap: 0.5em;
+    line-height: 1.15;
+    height: 5.2em;            /* three lines fully visible, a 4th fading at top */
     overflow: hidden;
-    font-size: clamp(0.7rem, 4cqw, 1.2rem);
+    font-size: var(--size-ui);
     font-weight: 400;
+    scrollbar-width: none;    /* invisible scrollbar */
     /* match the display so each line's last digit centres on the right column */
     padding-right: calc(100% / 12 - 0.3em);
   }
+  .history::-webkit-scrollbar { display: none; }
   .history .line {
     color: #9a9a9a;
     white-space: nowrap;
@@ -234,7 +243,8 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: linear-gradient(to bottom, #fff 0%, #fff 8%, rgba(255, 255, 255, 0) 100%);
+    /* fade only the top sliver so three lines stay clearly readable */
+    background: linear-gradient(to bottom, #fff 0%, #fff 2%, rgba(255, 255, 255, 0) 22%);
   }
   .history:not(:empty) { cursor: pointer; }
   /* Tapping the tape drops the fade and reveals every line in full. */
@@ -257,13 +267,13 @@
     white-space: nowrap;
     overflow: hidden;
     min-height: 1.2em;
-    font-size: clamp(1rem, 7cqw, 2rem);
+    font-size: var(--size-number); /* main line matches the six numbers */
   }
   .display .val {
-    font-weight: 500;
+    font-weight: 700;
     color: var(--ink);
   }
-  .display.empty .val { color: var(--grey); }
+  .display.empty .val { color: var(--muted); } /* "00" placeholder — not clickable */
   .display.win .val { color: var(--green); }
   .display.error .val { color: var(--red); }
 
@@ -280,7 +290,7 @@
     background: none;
     border: none;
     font-family: var(--font);
-    font-size: clamp(0.85rem, 5.5cqw, 1.6rem);
+    font-size: var(--size-ui);
     font-weight: 500;
     color: var(--ink);
     cursor: pointer;
@@ -293,7 +303,8 @@
   .key.clear { color: var(--red); }
   .key.equals { color: var(--green); }
 
-  /* Win screen — blank page with final time + actions */
+  /* Result screen — same minimal system as the rest of the app. The result
+     value uses the target (hero) size; labels and working use the UI size. */
   .winscreen {
     position: fixed;
     inset: 0;
@@ -307,22 +318,22 @@
   }
   body.won .winscreen { display: flex; }
   .win-label {
-    font-size: clamp(0.9rem, 1.4vw, 1.4rem);
+    font-size: var(--size-ui);
     font-weight: 700;
-    letter-spacing: 0.2em;
-    color: var(--grey);
+    letter-spacing: 0.15em;
+    color: var(--muted); /* label — not clickable */
     text-transform: uppercase;
   }
   .win-time {
-    font-size: clamp(3rem, 9vw, 11rem);
+    font-size: var(--size-target);
     font-weight: 700;
     color: var(--ink);
     line-height: 1;
   }
   .win-sub {
-    font-size: clamp(0.9rem, 1.6vw, 1.6rem);
-    font-weight: 500;
-    color: var(--grey);
+    font-size: var(--size-ui);
+    font-weight: 400;
+    color: var(--muted);
     text-align: center;
     min-height: 1em;
   }
@@ -331,20 +342,20 @@
     display: none;
     flex-direction: column;
     align-items: center;
-    gap: 0.3em;
-    max-width: 80vw;
+    gap: 0.5em;
+    line-height: 1.15;
   }
   .win-their.show { display: flex; }
   .their-title {
-    font-size: clamp(0.85rem, 1.3vw, 1.3rem);
+    font-size: var(--size-ui);
     font-weight: 700;
-    color: var(--ink);
+    color: var(--muted);
     margin-bottom: 0.4em;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.15em;
     text-transform: uppercase;
   }
   .their-line {
-    font-size: clamp(0.85rem, 1.3vw, 1.3rem);
+    font-size: var(--size-ui);
     font-weight: 400;
     color: #9a9a9a;
   }
@@ -352,12 +363,14 @@
     display: flex;
     gap: 2.5em;
   }
+  /* Share/Home — clickable, so full black and identical to the Submit button. */
   .win-btn {
     background: none;
     border: none;
     font-family: var(--font);
-    font-size: clamp(1rem, 1.8vw, 1.8rem);
+    font-size: var(--size-ui);
     font-weight: 700;
+    letter-spacing: 0.15em;
     color: var(--ink);
     cursor: pointer;
     padding: 0.2em 0.4em;
@@ -365,7 +378,6 @@
   }
   .win-btn:hover { transform: scale(1.12); }
   .win-btn:active { transform: scale(0.94); }
-  .win-btn.share { color: var(--green); }
 
   /* "Beat" banner — shown under the timer when playing a shared puzzle */
   .beat {
@@ -375,9 +387,9 @@
     right: 0;
     text-align: center;
     font-family: var(--font);
-    font-size: clamp(0.8rem, 1.2vw, 1.2rem);
+    font-size: var(--size-ui);
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.15em;
     color: var(--green);
     z-index: 40;
     pointer-events: none;
@@ -694,6 +706,7 @@ const KEYS = [
 ];
 let expr = "";
 let justEvaluated = false; // true while the display is showing a fresh result
+let carry = null;          // previous answer carried into the current line
 
 function buildKeys() {
   keysEl.innerHTML = "";
@@ -726,6 +739,7 @@ function clearAll() {
   historyWrapEl.classList.remove("expanded");
   expr = "";
   justEvaluated = false;
+  carry = null;
   renderDisplay();
   // Fresh canvas: restore the six numbers and the available pool.
   for (let i = 0; i < SLOT_COUNT; i++) {
@@ -760,15 +774,24 @@ function liftResult() {
   }
   expr = "";
   justEvaluated = false;
+  carry = null;
   renderDisplay();
 }
 
 function pressKey(label) {
   if (label === "c") {
-    // On a freshly generated answer, clear lifts it up (like a second =)
-    // instead of deleting it. Mid-equation, it just wipes the line.
+    // Clear wipes the current line, but never loses the previous answer:
+    //  - on a freshly shown result, lift it up (like a second =)
+    //  - if the line was started from a previous answer, push that answer up
+    //  - otherwise just wipe a from-scratch equation
     if (justEvaluated) {
       liftResult();
+    } else if (carry !== null) {
+      history.push(carry);
+      renderHistory();
+      carry = null;
+      expr = "";
+      renderDisplay();
     } else {
       expr = "";
       renderDisplay();
@@ -782,8 +805,10 @@ function pressKey(label) {
     return;
   }
   // Typing right after a result: a number/sqrt/decimal/bracket starts a fresh
-  // entry; an operator continues from the result.
+  // entry; an operator continues from the result. Either way, remember that
+  // result so a later clear can preserve it.
   if (justEvaluated) {
+    carry = expr;
     if (/[0-9√(]/.test(label)) expr = "";
     justEvaluated = false;
   }
@@ -853,6 +878,7 @@ function evaluate() {
   renderHistory();
   expr = String(rounded);
   justEvaluated = true;
+  carry = null; // the equation (with its inputs) is already in the tape
   renderDisplay();
 
   // Clean solve only when the target is matched AND all six numbers are used.
@@ -894,6 +920,7 @@ function backToHome() {
   historyWrapEl.classList.remove("expanded");
   expr = "";
   justEvaluated = false;
+  carry = null;
   renderDisplay();
   clearSave();
   window.history.replaceState({}, "", location.pathname);
@@ -949,14 +976,12 @@ function fmtResult(o) {
 // Compare my result to the opponent's: closer to target wins; ties broken by a
 // clean solve, then by faster time.
 function verdict(me, them) {
+  // Closer to the target wins. If the same number was reached, the faster
+  // player wins. Only a dead heat on both is a tie.
   if (me.distance !== them.distance) return me.distance < them.distance ? "win" : "lose";
-  if (me.solved && them.solved) {
-    if (Math.round(me.timeSec) !== Math.round(them.timeSec)) {
-      return me.timeSec < them.timeSec ? "win" : "lose";
-    }
-    return "tie";
+  if (Math.round(me.timeSec) !== Math.round(them.timeSec)) {
+    return me.timeSec < them.timeSec ? "win" : "lose";
   }
-  if (me.solved !== them.solved) return me.solved ? "win" : "lose";
   return "tie";
 }
 
@@ -1029,6 +1054,7 @@ function saveState() {
     available: available,
     expr: expr,
     justEvaluated: justEvaluated,
+    carry: carry,
     lastResult: lastResult,
     lastOutcome: lastOutcome,
     sharedGame: sharedGame,
@@ -1081,6 +1107,7 @@ function restoreState(s) {
   available = s.available ? s.available.slice() : [];
   expr = s.expr || "";
   justEvaluated = !!s.justEvaluated;
+  carry = s.carry === undefined ? null : s.carry;
   lastResult = s.lastResult === undefined ? null : s.lastResult;
   lastOutcome = s.lastOutcome || null;
   sharedGame = s.sharedGame || null;
