@@ -342,12 +342,10 @@
   .display.error .val { color: var(--red); }
 
   .keys {
-    width: calc(100% * 25 / 24);
-    margin-left: calc(100% * -1 / 48);
+    width: 100%;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    column-gap: 0;
-    row-gap: 0.7em;
+    grid-template-columns: repeat(3, 1fr); /* v2: operators in a 3x3 grid */
+    row-gap: 0.9em;
     justify-items: center;
   }
   .key {
@@ -597,7 +595,7 @@
         <p>Reach the <b>target</b>, or work down to <b>0</b>, using each of the six numbers once.</p>
         <p>Tap a number (or the target) to add it to your line, then a math symbol, then another number.</p>
         <p>Each new number you make becomes a chip you can reuse.</p>
-        <p>&#9003; deletes your last move &middot; c clears the line &middot; double-tap c wipes everything.</p>
+        <p>c clears the line &middot; double-tap c wipes everything.</p>
       </div>
       <button id="menu-help-back" class="menu-btn">Back</button>
     </div>
@@ -882,16 +880,15 @@ function stopTimer() {
 
 /* ---------------- Calculator ---------------- */
 // v2: no digit pad — numbers are clicked in from the board above. Only
-// operators live on the keypad. "⌫" deletes the last move.
+// operators live on the keypad, in a 3x3 grid. "()" is one smart bracket.
 const KEYS = [
-  "+", "-", "x", "÷", "^",
-  "(", ")", "√", "c", "=",
-  "⌫",
+  "+", "-", "x",
+  "÷", "^", "√",
+  "()", "c", "=",
 ];
 let expr = "";
 let justEvaluated = false; // kept for save/restore compatibility (unused in v2)
 let carry = null;          // kept for save/restore compatibility (unused in v2)
-let undoStack = [];        // expr snapshots so ⌫ can delete the last move
 
 function buildKeys() {
   keysEl.innerHTML = "";
@@ -900,7 +897,6 @@ function buildKeys() {
     btn.className = "key";
     if (label === "c") btn.classList.add("clear");
     if (label === "=") btn.classList.add("equals");
-    if (label === "⌫") btn.style.gridColumn = "3"; // delete sits centred below
     btn.textContent = label;
     btn.addEventListener("click", () => pressKey(label));
     // Double-clicking the red clear wipes the whole tape back to blank.
@@ -924,7 +920,6 @@ function clearAll() {
   renderHistory();
   historyWrapEl.classList.remove("expanded");
   expr = "";
-  undoStack = [];
   renderDisplay();
   // Fresh canvas: restore the six numbers and the available pool.
   for (let i = 0; i < SLOT_COUNT; i++) {
@@ -967,18 +962,17 @@ function canInsertNumber() {
 // Append a number's value to the calculation line (clicked from the board).
 function insertValue(v) {
   if (!canInsertNumber()) return; // must put an operator between two numbers
-  undoStack.push(expr);
   expr += String(v);
   renderDisplay();
   saveState();
 }
 
-// Delete the most recent move (number or operator).
-function undo() {
-  if (undoStack.length === 0) return;
-  expr = undoStack.pop();
-  renderDisplay();
-  saveState();
+// One bracket button: closes an open "(" when we're right after a value,
+// otherwise opens a new "(".
+function nextBracket() {
+  const open = (expr.match(/\(/g) || []).length - (expr.match(/\)/g) || []).length;
+  const last = expr[expr.length - 1] || "";
+  return open > 0 && /[0-9.)]/.test(last) ? ")" : "(";
 }
 
 function renderDisplay() {
@@ -992,10 +986,9 @@ function renderDisplay() {
 }
 
 function pressKey(label) {
-  if (label === "⌫") { undo(); return; }
-  if (label === "c") { expr = ""; undoStack = []; renderDisplay(); saveState(); return; }
+  if (label === "c") { expr = ""; renderDisplay(); saveState(); return; }
   if (label === "=") { evaluate(); saveState(); return; }
-  undoStack.push(expr);
+  if (label === "()") { expr += nextBracket(); renderDisplay(); saveState(); return; }
   expr += label === "√" ? "√(" : label;
   renderDisplay();
   saveState();
@@ -1049,7 +1042,6 @@ function evaluate() {
   renderHistory();
   renderGenerated();    // the new result becomes a clickable chip
   expr = "";            // clear the line for the next step
-  undoStack = [];
   renderDisplay();
 
   // Round complete: reach the target with all six numbers used, OR work down
@@ -1199,7 +1191,6 @@ function backToHome() {
   renderGenerated();
   historyWrapEl.classList.remove("expanded");
   expr = "";
-  undoStack = [];
   justEvaluated = false;
   carry = null;
   renderDisplay();
