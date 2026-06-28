@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="light" />
+<title>Numbers Round</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #111;
+    --grey: #c9c9c9;
+    --green: #1ec96f;
+    --red: #e8503a;
+    --font: "Roboto Mono", ui-monospace, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  html { background: #ffffff; }
+  body {
+    margin: 0;
+    background: #ffffff;
+    color: var(--ink);
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Green perimeter indicator — one continuous bar, browser-animated */
+  .border {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 50;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  body.playing .border { opacity: 1; }
+  .border path {
+    fill: none;
+    stroke: var(--green);
+    stroke-width: 10;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    stroke-dasharray: 1000 1000; /* pathLength=1000 -> one full lap */
+    stroke-dashoffset: 0;
+    will-change: stroke-dashoffset;
+  }
+  /* Lap one: green grows from nothing to the full perimeter over a minute.
+     When that lap finishes the border locks to solid red and stops moving
+     (handled in JS on animationend). */
+  .border path { stroke: var(--green); }
+  body.playing .border path { animation: borderGrow 120s linear forwards; }
+  @keyframes borderGrow {
+    from { stroke-dashoffset: 1000; } /* empty */
+    to   { stroke-dashoffset: 0; }    /* full perimeter */
+  }
+
+  /* Timer */
+  .timer {
+    position: fixed;
+    top: 5vh;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: clamp(0.9rem, 1.4vw, 1.4rem);
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--grey);
+    z-index: 40;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  body.playing .timer { opacity: 1; }
+
+  /* Submit — same look as the timer, mirrored to the bottom. Appears only once
+     time is up (the red border has finished). */
+  .submit {
+    position: fixed;
+    bottom: 5vh;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: var(--font);
+    font-size: clamp(0.9rem, 1.4vw, 1.4rem);
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--grey);
+    background: none;
+    border: none;
+    cursor: pointer;
+    z-index: 40;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s, transform 0.08s;
+  }
+  body.playing.time-up .submit { opacity: 1; pointer-events: auto; }
+  .submit:hover { transform: scale(1.12); }
+  .submit:active { transform: scale(0.94); }
+
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  /* Content box ~ 40% of the screen width, scales with it.
+     One centered container; extra gap lifts the target/numbers up and drops
+     the calculator down. */
+  .content {
+    width: 40vw;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5vh;
+  }
+
+  /* Target */
+  .target {
+    display: flex;
+    gap: 0.05em;
+    cursor: pointer;
+    user-select: none;
+    line-height: 1;
+  }
+  .reel {
+    display: inline-block;
+    width: 0.62em;
+    text-align: center;
+    font-size: clamp(2.5rem, 8vw, 10rem);
+    font-weight: 700;
+  }
+  .reel.spinning { color: #444; }
+  .reel.lock { animation: pop 0.28s ease; }
+  @keyframes pop {
+    0%   { transform: translateY(-6px) scale(1.12); }
+    60%  { transform: translateY(2px) scale(0.98); }
+    100% { transform: translateY(0) scale(1); }
+  }
+
+  /* Number slots — 6-column grid, full content width */
+  .slots {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+  }
+  .slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35em;
+  }
+  .arrow {
+    background: none;
+    border: none;
+    padding: 0.15em 0.3em;
+    color: var(--ink);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    transition: transform 0.08s, opacity 0.12s;
+  }
+  .arrow svg { width: clamp(0.9rem, 1.7vw, 1.7rem); height: auto; display: block; }
+  .arrow:hover { transform: scale(1.25); }
+  .arrow:active { transform: scale(0.9); }
+  .arrow:disabled { opacity: 0.18; cursor: default; transform: none; }
+  body.playing .arrow { display: none; } /* arrows gone once all six are picked */
+  .slot-num {
+    font-size: clamp(1rem, 2.2vw, 2.2rem);
+    font-weight: 700;
+    color: var(--grey);
+    text-align: center;
+    transition: color 0.15s;
+  }
+  .slot-num.filled { color: var(--ink); }
+  .slot-num.spinning { color: #9a9a9a; }
+  .slot-num.lock { animation: pop 0.26s ease; }
+  .slot-num.used { opacity: 0.2; } /* dim numbers already used in an equation */
+
+  /* Calculator — hidden until all six numbers are drawn.
+     The 5 key columns are widened to span the 6 numbers' centres
+     (1/12 .. 11/12), so the outer columns sit under the outer numbers. */
+  .calc {
+    width: 100%;
+    margin-top: 1vh;
+    display: none;
+    flex-direction: column;
+    gap: 1.4em;
+  }
+  body.playing .calc { display: flex; }
+
+  /* Equation tape: faded previous lines above the current input line, with a
+     white gradient that fades the oldest lines toward the top. */
+  .history-wrap {
+    position: relative;
+    width: 100%;
+  }
+  .history {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: flex-end;
+    gap: 0.4em;
+    height: 4vh;
+    overflow: hidden;
+    font-size: clamp(0.85rem, 1.7vw, 1.7rem);
+    font-weight: 400;
+    /* match the display so each line's last digit centres on the right column */
+    padding-right: calc(100% / 12 - 0.3em);
+  }
+  .history .line {
+    color: #9a9a9a;
+    white-space: nowrap;
+  }
+  .history-wrap::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(to bottom, #fff 0%, #fff 8%, rgba(255, 255, 255, 0) 100%);
+  }
+  .history:not(:empty) { cursor: pointer; }
+  /* Tapping the tape drops the fade and reveals every line in full. */
+  .history-wrap.expanded::after { display: none; }
+  .history-wrap.expanded .history {
+    height: auto;
+    overflow: visible;
+    justify-content: flex-start;
+  }
+
+  .display {
+    width: 100%;
+    /* Right-align and nudge the last digit half a glyph further right so it
+       sits centred over the far-right key column (9 / 6 / 3) and the last
+       number. Typed digits grow leftward. */
+    text-align: right;
+    padding-right: calc(100% / 12 - 0.3em);
+    white-space: nowrap;
+    overflow: hidden;
+    min-height: 1.2em;
+    font-size: clamp(1.2rem, 2.6vw, 2.6rem);
+  }
+  .display .val {
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .display.empty .val { color: var(--grey); }
+  .display.win .val { color: var(--green); }
+  .display.error .val { color: var(--red); }
+
+  .keys {
+    width: calc(100% * 25 / 24);
+    margin-left: calc(100% * -1 / 48);
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    column-gap: 0;
+    row-gap: 0.7em;
+    justify-items: center;
+  }
+  .key {
+    background: none;
+    border: none;
+    font-family: var(--font);
+    font-size: clamp(1rem, 1.8vw, 1.8rem);
+    font-weight: 500;
+    color: var(--ink);
+    cursor: pointer;
+    padding: 0.15em 0.4em;
+    user-select: none;
+    transition: transform 0.08s, opacity 0.12s;
+  }
+  .key:hover { transform: scale(1.25); }
+  .key:active { transform: scale(0.9); }
+  .key.clear { color: var(--red); }
+  .key.equals { color: var(--green); }
+
+  /* Win screen — blank page with final time + actions */
+  .winscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: #ffffff;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6vh;
+  }
+  body.won .winscreen { display: flex; }
+  .win-label {
+    font-size: clamp(0.9rem, 1.4vw, 1.4rem);
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    color: var(--grey);
+    text-transform: uppercase;
+  }
+  .win-time {
+    font-size: clamp(3rem, 9vw, 11rem);
+    font-weight: 700;
+    color: var(--ink);
+    line-height: 1;
+  }
+  .win-actions {
+    display: flex;
+    gap: 2.5em;
+  }
+  .win-btn {
+    background: none;
+    border: none;
+    font-family: var(--font);
+    font-size: clamp(1rem, 1.8vw, 1.8rem);
+    font-weight: 700;
+    color: var(--ink);
+    cursor: pointer;
+    padding: 0.2em 0.4em;
+    transition: transform 0.08s;
+  }
+  .win-btn:hover { transform: scale(1.12); }
+  .win-btn:active { transform: scale(0.94); }
+  .win-btn.share { color: var(--green); }
+
+  .toast {
+    position: fixed;
+    bottom: 4vh;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: #fff;
+    font-size: clamp(0.8rem, 1.2vw, 1.1rem);
+    padding: 0.6em 1.2em;
+    border-radius: 6px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s;
+    z-index: 70;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <svg class="border" preserveAspectRatio="none" aria-hidden="true">
+    <path id="border-path" pathLength="1000" d="" />
+  </svg>
+
+  <div id="timer" class="timer">00:00</div>
+
+  <button id="submit" class="submit">Submit</button>
+
+  <main class="stage">
+    <div class="content">
+      <div id="target" class="target" role="button" tabindex="0" aria-label="Generate target number">
+        <span class="reel">0</span>
+        <span class="reel">0</span>
+        <span class="reel">0</span>
+      </div>
+
+      <div id="slots" class="slots"></div>
+
+      <div class="calc">
+        <div class="history-wrap">
+          <div id="history" class="history"></div>
+        </div>
+        <div id="display" class="display empty"><span class="val">00</span></div>
+        <div id="keys" class="keys"></div>
+      </div>
+    </div>
+  </main>
+
+  <div id="winscreen" class="winscreen">
+    <div class="win-label">Solved in</div>
+    <div id="win-time" class="win-time">00:00</div>
+    <div class="win-actions">
+      <button id="win-home" class="win-btn">Home</button>
+      <button id="win-share" class="win-btn share">Share</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+<script>
+"use strict";
+
+/* ---------------- Number pools ---------------- */
+const SLOT_COUNT = 6;
+function freshLargeBag() {
+  // Multiples of five from 20 up to 100, one of each (no duplicates).
+  const bag = [];
+  for (let n = 20; n <= 100; n += 5) bag.push(n);
+  return bag;
+}
+function freshSmallBag() {
+  // One of each 1..10 — no duplicates, so the six numbers are always distinct.
+  const bag = [];
+  for (let n = 1; n <= 10; n++) bag.push(n);
+  return bag;
+}
+let largeBag = freshLargeBag();
+let smallBag = freshSmallBag();
+
+/* ---------------- DOM ---------------- */
+const SVGNS = "http://www.w3.org/2000/svg";
+const targetEl = document.getElementById("target");
+const reels = [...targetEl.querySelectorAll(".reel")];
+const slotsEl = document.getElementById("slots");
+const timerEl = document.getElementById("timer");
+const borderSvg = document.querySelector(".border");
+const borderPath = document.getElementById("border-path");
+const displayEl = document.getElementById("display");
+const displayValEl = displayEl.querySelector(".val");
+const keysEl = document.getElementById("keys");
+const historyEl = document.getElementById("history");
+const historyWrapEl = document.querySelector(".history-wrap");
+const winTimeEl = document.getElementById("win-time");
+const winHomeBtn = document.getElementById("win-home");
+const winShareBtn = document.getElementById("win-share");
+const toastEl = document.getElementById("toast");
+const submitEl = document.getElementById("submit");
+
+let isRollingTarget = false;
+let currentTarget = null;
+const slotValues = new Array(SLOT_COUNT).fill(null);
+const slotUsed = new Array(SLOT_COUNT).fill(false);
+let history = [];
+// Numbers currently usable in an equation: the six drawn numbers plus any
+// results produced along the way. Each is consumed once.
+let available = [];
+
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/* ---------------- Chevron arrows (identical up/down) ---------------- */
+function chevron(dir) {
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 12");
+  const p = document.createElementNS(SVGNS, "path");
+  p.setAttribute("d", dir === "up" ? "M2 9 L8 3 L14 9" : "M2 3 L8 9 L14 3");
+  p.setAttribute("fill", "none");
+  p.setAttribute("stroke", "currentColor");
+  p.setAttribute("stroke-width", "2.4");
+  p.setAttribute("stroke-linecap", "round");
+  p.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(p);
+  return svg;
+}
+
+/* ---------------- Slots ---------------- */
+function buildSlots() {
+  slotsEl.innerHTML = "";
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const slot = document.createElement("div");
+    slot.className = "slot";
+
+    const up = document.createElement("button");
+    up.className = "arrow up";
+    up.setAttribute("aria-label", "Draw a large number");
+    up.appendChild(chevron("up"));
+    up.addEventListener("click", () => drawInto(i, "large"));
+
+    const num = document.createElement("div");
+    num.className = "slot-num";
+    num.textContent = "00";
+
+    const down = document.createElement("button");
+    down.className = "arrow down";
+    down.setAttribute("aria-label", "Draw a small number");
+    down.appendChild(chevron("down"));
+    down.addEventListener("click", () => drawInto(i, "small"));
+
+    slot.append(up, num, down);
+    slotsEl.appendChild(slot);
+  }
+}
+
+function slotParts(i) {
+  const slot = slotsEl.children[i];
+  return {
+    up: slot.querySelector(".up"),
+    down: slot.querySelector(".down"),
+    num: slot.querySelector(".slot-num"),
+  };
+}
+
+function resetSlots() {
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const { up, down, num } = slotParts(i);
+    num.textContent = "00";
+    num.className = "slot-num";
+    // Arrows stay disabled until a target has been generated.
+    up.disabled = true;
+    down.disabled = true;
+    slotValues[i] = null;
+    slotUsed[i] = false;
+  }
+  largeBag = freshLargeBag();
+  smallBag = freshSmallBag();
+}
+
+// Enable/disable the draw arrows on every still-empty slot.
+function setArrowsEnabled(enabled) {
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const { up, down, num } = slotParts(i);
+    if (num.classList.contains("filled")) continue;
+    up.disabled = !enabled;
+    down.disabled = !enabled;
+  }
+}
+
+function countFilled() {
+  let n = 0;
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    if (slotParts(i).num.classList.contains("filled")) n++;
+  }
+  return n;
+}
+
+function drawInto(i, size) {
+  const { up, down, num } = slotParts(i);
+  if (num.classList.contains("filled") || num.classList.contains("spinning")) return;
+
+  const bag = size === "large" ? largeBag : smallBag;
+  if (bag.length === 0) {
+    num.animate([{ opacity: 1 }, { opacity: 0.25 }, { opacity: 1 }], { duration: 300 });
+    return;
+  }
+
+  const value = bag.splice(randInt(0, bag.length - 1), 1)[0];
+  slotValues[i] = value;
+
+  num.classList.add("spinning");
+  const spin = setInterval(() => {
+    num.textContent = size === "large" ? randInt(10, 99) : randInt(1, 9);
+  }, 45);
+
+  setTimeout(() => {
+    clearInterval(spin);
+    num.textContent = value;
+    num.classList.remove("spinning");
+    num.classList.add("filled", "lock");
+    setTimeout(() => num.classList.remove("lock"), 280);
+    up.disabled = true;
+    down.disabled = true;
+    // Only begin once BOTH the target and all six numbers exist.
+    if (countFilled() === SLOT_COUNT && currentTarget !== null) startPlaying();
+  }, 420);
+}
+
+/* ---------------- Green border geometry (CSS drives the motion) ---------------- */
+function layoutBorder() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const inset = 5; // half the stroke width, keeps the bar fully on-screen
+  const cx = w / 2;
+  borderSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  // Start at top-centre and run clockwise (toward the top-right first) so the
+  // green grows from the top centre to the right.
+  borderPath.setAttribute(
+    "d",
+    `M${cx} ${inset} L${w - inset} ${inset} L${w - inset} ${h - inset} ` +
+    `L${inset} ${h - inset} L${inset} ${inset} Z`
+  );
+}
+window.addEventListener("resize", layoutBorder);
+
+// When the green lap finishes growing, lock the border to a solid red ring
+// with no further motion.
+borderPath.addEventListener("animationend", () => {
+  borderPath.style.animation = "none";
+  borderPath.style.stroke = "var(--red)";
+  borderPath.style.strokeDashoffset = "0";
+  document.body.classList.add("time-up"); // reveal the submit button
+});
+function resetBorder() {
+  borderPath.style.animation = "";
+  borderPath.style.stroke = "";
+  borderPath.style.strokeDashoffset = "";
+}
+
+/* ---------------- Timer text ---------------- */
+let timerInt = null;
+let startTime = 0;
+
+function fmtTime(totalSeconds) {
+  const s = Math.floor(totalSeconds);
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return mm + ":" + ss;
+}
+
+function startTimer() {
+  startTime = performance.now();
+  timerEl.textContent = "00:00";
+  clearInterval(timerInt);
+  timerInt = setInterval(() => {
+    timerEl.textContent = fmtTime((performance.now() - startTime) / 1000);
+  }, 250);
+}
+
+function stopTimer() {
+  clearInterval(timerInt);
+}
+
+/* ---------------- Calculator ---------------- */
+const KEYS = [
+  "^", "√", "7", "8", "9",
+  "x", "÷", "4", "5", "6",
+  "-", "+", "1", "2", "3",
+  "(", ")", "c", "0", "=",
+];
+let expr = "";
+let justEvaluated = false; // true while the display is showing a fresh result
+
+function buildKeys() {
+  keysEl.innerHTML = "";
+  KEYS.forEach((label) => {
+    const btn = document.createElement("button");
+    btn.className = "key";
+    if (label === "c") btn.classList.add("clear");
+    if (label === "=") btn.classList.add("equals");
+    btn.textContent = label;
+    btn.addEventListener("click", () => pressKey(label));
+    // Double-clicking the red clear wipes the whole tape back to blank.
+    if (label === "c") btn.addEventListener("dblclick", clearAll);
+    keysEl.appendChild(btn);
+  });
+}
+
+function renderHistory() {
+  historyEl.innerHTML = "";
+  history.forEach((line) => {
+    const d = document.createElement("div");
+    d.className = "line";
+    d.textContent = line;
+    historyEl.appendChild(d);
+  });
+}
+
+function clearAll() {
+  history = [];
+  renderHistory();
+  historyWrapEl.classList.remove("expanded");
+  expr = "";
+  justEvaluated = false;
+  renderDisplay();
+  // Fresh canvas: restore the six numbers and the available pool.
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    slotUsed[i] = false;
+    slotParts(i).num.classList.remove("used");
+  }
+  if (document.body.classList.contains("playing")) initAvailable();
+}
+
+function initAvailable() {
+  available = slotValues.map((v, i) => ({ value: v, slotIndex: i }));
+  // The target itself is usable too, so players can work backwards from it.
+  if (currentTarget !== null) available.push({ value: currentTarget, slotIndex: null });
+}
+
+function renderDisplay() {
+  if (expr === "") {
+    displayValEl.textContent = "00";
+    displayEl.className = "display empty";
+  } else {
+    displayValEl.textContent = expr;
+    displayEl.className = "display";
+  }
+}
+
+function pressKey(label) {
+  if (label === "c") {
+    expr = "";
+    justEvaluated = false;
+    renderDisplay();
+    return;
+  }
+  if (label === "=") {
+    handleEquals();
+    return;
+  }
+  // Typing right after a result: a number/sqrt/decimal/bracket starts a fresh
+  // entry; an operator continues from the result.
+  if (justEvaluated) {
+    if (/[0-9√(]/.test(label)) expr = "";
+    justEvaluated = false;
+  }
+  expr += label === "√" ? "√(" : label;
+  renderDisplay();
+}
+
+function handleEquals() {
+  if (justEvaluated) {
+    // Second press: send the shown result up a line and start fresh at 00.
+    if (expr !== "") {
+      history.push(expr);
+      renderHistory();
+    }
+    expr = "";
+    justEvaluated = false;
+    renderDisplay();
+    return;
+  }
+  evaluate();
+}
+
+function evaluate() {
+  if (expr === "") return;
+  if (!/^[0-9+\-x÷^√().\s]*$/.test(expr)) return showError();
+
+  const js = expr
+    .replace(/√/g, "Math.sqrt")
+    .replace(/x/g, "*")
+    .replace(/÷/g, "/")
+    .replace(/\^/g, "**");
+
+  let value;
+  try {
+    value = Function('"use strict"; return (' + js + ");")();
+  } catch (e) {
+    return showError();
+  }
+  if (typeof value !== "number" || !isFinite(value)) return showError();
+
+  const rounded = Math.round(value * 1e6) / 1e6;
+
+  // Strict rule check: every number literal must be one of the still-available
+  // numbers (an original drawn number or a result made earlier). Otherwise the
+  // move is illegal and rejected.
+  const literals = (expr.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+  const pool = available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, taken: false }));
+  const consumed = [];
+  for (const lit of literals) {
+    // Prefer consuming an original drawn number so it fades.
+    let idx = pool.findIndex((e) => !e.taken && e.value === lit && e.slotIndex !== null);
+    if (idx === -1) idx = pool.findIndex((e) => !e.taken && e.value === lit);
+    if (idx === -1) return showError(); // number not available -> illegal move
+    pool[idx].taken = true;
+    consumed.push(pool[idx]);
+  }
+
+  // Commit: fade used original numbers, drop consumed entries, add the result.
+  consumed.forEach((c) => {
+    if (c.slotIndex !== null) {
+      slotUsed[c.slotIndex] = true;
+      slotParts(c.slotIndex).num.classList.add("used");
+    }
+  });
+  available = pool.filter((e) => !e.taken).map((e) => ({ value: e.value, slotIndex: e.slotIndex }));
+  available.push({ value: rounded, slotIndex: null });
+
+  // The equation moves up into the tape; the answer drops onto the main line.
+  // A second press of = sends the answer up too and resets to 00.
+  history.push(expr);
+  renderHistory();
+  expr = String(rounded);
+  justEvaluated = true;
+  renderDisplay();
+
+  // Win only when the target is matched AND all six numbers have been used.
+  const allUsed = slotUsed.every(Boolean);
+  if (currentTarget !== null && rounded === currentTarget && allUsed) showWin();
+}
+
+function showError() {
+  displayValEl.textContent = "Error";
+  displayEl.className = "display error";
+}
+
+/* ---------------- Round flow ---------------- */
+function startPlaying() {
+  if (document.body.classList.contains("playing")) return;
+  layoutBorder();
+  resetBorder();
+  initAvailable();
+  document.body.classList.remove("time-up");
+  document.body.classList.add("playing");
+  startTimer();
+}
+
+function backToHome() {
+  document.body.classList.remove("playing", "won", "time-up");
+  stopTimer();
+  resetSlots();
+  history = [];
+  available = [];
+  renderHistory();
+  historyWrapEl.classList.remove("expanded");
+  expr = "";
+  justEvaluated = false;
+  renderDisplay();
+}
+
+/* ---------------- Win screen ---------------- */
+function showWin() {
+  stopTimer();
+  winTimeEl.textContent = timerEl.textContent;
+  document.body.classList.add("won");
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2000);
+}
+
+function sharePuzzle() {
+  if (currentTarget === null) return;
+  const url = new URL(location.href);
+  url.searchParams.set("t", String(currentTarget));
+  url.searchParams.set("n", slotValues.join(","));
+  const link = url.toString();
+  if (navigator.share) {
+    navigator.share({
+      title: "Numbers Round",
+      text: "Can you reach " + currentTarget + "?",
+      url: link,
+    }).catch(() => {});
+  } else if (navigator.clipboard) {
+    navigator.clipboard.writeText(link).then(
+      () => showToast("Puzzle link copied"),
+      () => showToast(link)
+    );
+  } else {
+    showToast(link);
+  }
+}
+
+winHomeBtn.addEventListener("click", goHome);
+winShareBtn.addEventListener("click", sharePuzzle);
+submitEl.addEventListener("click", showWin);
+
+// Open a shared puzzle straight into play mode (?t=803&n=50,75,25,100,50,75).
+function loadFromURL() {
+  const p = new URLSearchParams(location.search);
+  const t = parseInt(p.get("t"), 10);
+  const nRaw = p.get("n");
+  if (isNaN(t) || !nRaw) return false;
+  const nums = nRaw.split(",").map((s) => parseInt(s, 10));
+  if (nums.length !== SLOT_COUNT || nums.some(isNaN)) return false;
+
+  currentTarget = t;
+  String(t).padStart(3, "0").split("").forEach((d, i) => {
+    if (reels[i]) { reels[i].textContent = d; reels[i].className = "reel"; }
+  });
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const { up, down, num } = slotParts(i);
+    num.textContent = nums[i];
+    num.className = "slot-num filled";
+    up.disabled = true;
+    down.disabled = true;
+    slotValues[i] = nums[i];
+  }
+  startPlaying();
+  return true;
+}
+
+/* Pressing the target while playing returns to the home screen showing 000,
+   WITHOUT rolling a new number. */
+function goHome() {
+  if (isRollingTarget) return;
+  backToHome();
+  currentTarget = null;
+  reels.forEach((r) => {
+    r.textContent = "0";
+    r.className = "reel";
+  });
+}
+
+function handleTargetPress() {
+  if (document.body.classList.contains("playing")) {
+    goHome();
+  } else {
+    rollTarget();
+  }
+}
+
+function rollTarget() {
+  if (isRollingTarget) return;
+  isRollingTarget = true;
+
+  backToHome();
+
+  currentTarget = randInt(100, 999);
+  const digits = String(currentTarget).split("").map(Number);
+
+  const spinners = reels.map((r) => {
+    r.classList.add("spinning");
+    r.classList.remove("lock");
+    return setInterval(() => { r.textContent = randInt(0, 9); }, 45);
+  });
+
+  const stopDelays = [650, 1050, 1450];
+  reels.forEach((r, i) => {
+    setTimeout(() => {
+      clearInterval(spinners[i]);
+      r.textContent = digits[i];
+      r.classList.remove("spinning");
+      r.classList.add("lock");
+      if (i === reels.length - 1) {
+        isRollingTarget = false;
+        setArrowsEnabled(true); // numbers can be drawn now the target exists
+      }
+    }, stopDelays[i]);
+  });
+}
+
+targetEl.addEventListener("click", handleTargetPress);
+targetEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    handleTargetPress();
+  }
+});
+
+/* ---------------- Init ---------------- */
+// Tapping the tape reveals every line (and removes the fade); tap again to
+// collapse it back.
+historyWrapEl.addEventListener("click", () => {
+  if (history.length === 0) return;
+  historyWrapEl.classList.toggle("expanded");
+});
+
+buildSlots();
+buildKeys();
+renderDisplay();
+renderHistory();
+setArrowsEnabled(false); // can't draw numbers until a target is generated
+layoutBorder();
+loadFromURL();
+</script>
+</body>
+</html>
