@@ -277,6 +277,9 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     justify-content: flex-start;
+    /* keep the same gap above the first line as the target<->numbers gap,
+       so expanding doesn't push the calculations up against the numbers */
+    padding-top: 3vh;
   }
 
   .display {
