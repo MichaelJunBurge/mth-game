@@ -109,15 +109,21 @@
     justify-content: center;
     padding: 24px;
   }
-  /* Content box ~ 40% of the screen width, scales with it.
-     One centered container; extra gap lifts the target/numbers up and drops
-     the calculator down. */
+  /* One centered column. Mobile takes ~60% of the width; desktop ~a third but
+     capped by max-width so it stops growing on wide screens. Inner elements
+     are sized in cqw (container width) so they scale with this column, not the
+     raw viewport. */
   .content {
-    width: 40vw;
+    width: 60vw;
+    max-width: 440px;
+    container-type: inline-size;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 5vh;
+  }
+  @media (min-width: 768px) {
+    .content { width: 33vw; }
   }
 
   /* Target */
@@ -132,7 +138,7 @@
     display: inline-block;
     width: 0.62em;
     text-align: center;
-    font-size: clamp(2.5rem, 8vw, 10rem);
+    font-size: clamp(2rem, 15cqw, 4.6rem);
     font-weight: 700;
   }
   .reel.spinning { color: #444; }
@@ -165,13 +171,13 @@
     display: flex;
     transition: transform 0.08s, opacity 0.12s;
   }
-  .arrow svg { width: clamp(0.9rem, 1.7vw, 1.7rem); height: auto; display: block; }
+  .arrow svg { width: clamp(0.7rem, 4cqw, 1.2rem); height: auto; display: block; }
   .arrow:hover { transform: scale(1.25); }
   .arrow:active { transform: scale(0.9); }
   .arrow:disabled { opacity: 0.18; cursor: default; transform: none; }
   body.playing .arrow { display: none; } /* arrows gone once all six are picked */
   .slot-num {
-    font-size: clamp(1rem, 2.2vw, 2.2rem);
+    font-size: clamp(0.85rem, 6cqw, 1.7rem);
     font-weight: 700;
     color: var(--grey);
     text-align: center;
@@ -208,7 +214,7 @@
     gap: 0.4em;
     height: 4vh;
     overflow: hidden;
-    font-size: clamp(0.85rem, 1.7vw, 1.7rem);
+    font-size: clamp(0.7rem, 4cqw, 1.2rem);
     font-weight: 400;
     /* match the display so each line's last digit centres on the right column */
     padding-right: calc(100% / 12 - 0.3em);
@@ -243,7 +249,7 @@
     white-space: nowrap;
     overflow: hidden;
     min-height: 1.2em;
-    font-size: clamp(1.2rem, 2.6vw, 2.6rem);
+    font-size: clamp(1rem, 7cqw, 2rem);
   }
   .display .val {
     font-weight: 500;
@@ -266,7 +272,7 @@
     background: none;
     border: none;
     font-family: var(--font);
-    font-size: clamp(1rem, 1.8vw, 1.8rem);
+    font-size: clamp(0.85rem, 5.5cqw, 1.6rem);
     font-weight: 500;
     color: var(--ink);
     cursor: pointer;
@@ -488,6 +494,7 @@ let lastResult = null;     // most recent calculator answer (the "reached" value
 let lastOutcome = null;    // this player's result for the just-finished game
 let sharedGame = null;     // when set, we're playing a puzzle someone sent us
 let borderDurationSec = 120; // how long the green bar takes to go around
+let activeShareCode = null;  // the ?g= code this game came from (for refresh restore)
 
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -606,6 +613,7 @@ function drawInto(i, size) {
     down.disabled = true;
     // Only begin once BOTH the target and all six numbers exist.
     if (countFilled() === SLOT_COUNT && currentTarget !== null) startPlaying();
+    else saveState(); // persist selection progress
   }, 420);
 }
 
@@ -638,11 +646,12 @@ function resetBorder() {
   borderPath.style.animation = "";
   borderPath.style.stroke = "";
   borderPath.style.strokeDashoffset = "";
+  borderPath.style.animationDelay = "";
 }
 
 /* ---------------- Timer text ---------------- */
 let timerInt = null;
-let startTime = 0;
+let startEpoch = 0; // absolute ms when the round began (survives a refresh)
 
 function fmtTime(totalSeconds) {
   const s = Math.floor(totalSeconds);
@@ -651,13 +660,17 @@ function fmtTime(totalSeconds) {
   return mm + ":" + ss;
 }
 
-function startTimer() {
-  startTime = performance.now();
-  timerEl.textContent = "00:00";
+function runTimerLoop() {
+  timerEl.textContent = fmtTime((Date.now() - startEpoch) / 1000);
   clearInterval(timerInt);
   timerInt = setInterval(() => {
-    timerEl.textContent = fmtTime((performance.now() - startTime) / 1000);
+    timerEl.textContent = fmtTime((Date.now() - startEpoch) / 1000);
   }, 250);
+}
+
+function startTimer() {
+  startEpoch = Date.now();
+  runTimerLoop();
 }
 
 function stopTimer() {
@@ -712,6 +725,7 @@ function clearAll() {
     slotParts(i).num.classList.remove("used");
   }
   if (document.body.classList.contains("playing")) initAvailable();
+  saveState();
 }
 
 function initAvailable() {
@@ -751,10 +765,12 @@ function pressKey(label) {
       expr = "";
       renderDisplay();
     }
+    saveState();
     return;
   }
   if (label === "=") {
     handleEquals();
+    saveState();
     return;
   }
   // Typing right after a result: a number/sqrt/decimal/bracket starts a fresh
@@ -765,6 +781,7 @@ function pressKey(label) {
   }
   expr += label === "√" ? "√(" : label;
   renderDisplay();
+  saveState();
 }
 
 function handleEquals() {
@@ -850,6 +867,7 @@ function startPlaying() {
   document.body.classList.remove("time-up");
   document.body.classList.add("playing");
   startTimer();
+  saveState();
 }
 
 function backToHome() {
@@ -862,17 +880,20 @@ function backToHome() {
   lastOutcome = null;
   sharedGame = null;
   borderDurationSec = 120;
+  activeShareCode = null;
   beatEl.classList.remove("show");
   renderHistory();
   historyWrapEl.classList.remove("expanded");
   expr = "";
   justEvaluated = false;
   renderDisplay();
+  clearSave();
+  window.history.replaceState({}, "", location.pathname);
 }
 
 /* ---------------- Scoring & end of game ---------------- */
 function elapsedSeconds() {
-  return (performance.now() - startTime) / 1000;
+  return (Date.now() - startEpoch) / 1000;
 }
 
 // Score when you don't cleanly solve: the value you reached plus the sum of any
@@ -972,6 +993,132 @@ function endGame() {
   }
 
   document.body.classList.add("won");
+  saveState();
+}
+
+/* ---------------- Persistence (survive a page refresh) ---------------- */
+const SAVE_KEY = "numbersRound.save.v1";
+
+function currentPhase() {
+  if (document.body.classList.contains("won")) return "won";
+  if (document.body.classList.contains("playing")) return "play";
+  if (currentTarget !== null) return "select";
+  return "home";
+}
+
+function saveState() {
+  const phase = currentPhase();
+  if (phase === "home") {
+    try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+    return;
+  }
+  const snapshot = {
+    phase: phase,
+    currentTarget: currentTarget,
+    slotValues: slotValues,
+    slotUsed: slotUsed,
+    history: history,
+    available: available,
+    expr: expr,
+    justEvaluated: justEvaluated,
+    lastResult: lastResult,
+    lastOutcome: lastOutcome,
+    sharedGame: sharedGame,
+    borderDurationSec: borderDurationSec,
+    startEpoch: startEpoch,
+    largeBag: largeBag,
+    smallBag: smallBag,
+    shareCode: activeShareCode,
+  };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot)); } catch (e) {}
+}
+
+function readSave() {
+  try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; }
+}
+
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+}
+
+// Rebuild a saved game so a refresh lands back where you were.
+function restoreState(s) {
+  if (!s || s.currentTarget == null) return false;
+
+  currentTarget = s.currentTarget;
+  String(currentTarget).padStart(3, "0").split("").forEach((d, i) => {
+    if (reels[i]) { reels[i].textContent = d; reels[i].className = "reel"; }
+  });
+
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const { up, down, num } = slotParts(i);
+    if (s.slotValues && s.slotValues[i] != null) {
+      slotValues[i] = s.slotValues[i];
+      slotUsed[i] = !!(s.slotUsed && s.slotUsed[i]);
+      num.textContent = s.slotValues[i];
+      num.className = "slot-num filled" + (slotUsed[i] ? " used" : "");
+      up.disabled = true;
+      down.disabled = true;
+    } else {
+      slotValues[i] = null;
+      slotUsed[i] = false;
+      num.textContent = "00";
+      num.className = "slot-num";
+    }
+  }
+
+  if (s.largeBag) largeBag = s.largeBag.slice();
+  if (s.smallBag) smallBag = s.smallBag.slice();
+  history = s.history ? s.history.slice() : [];
+  available = s.available ? s.available.slice() : [];
+  expr = s.expr || "";
+  justEvaluated = !!s.justEvaluated;
+  lastResult = s.lastResult === undefined ? null : s.lastResult;
+  lastOutcome = s.lastOutcome || null;
+  sharedGame = s.sharedGame || null;
+  borderDurationSec = s.borderDurationSec || 120;
+  startEpoch = s.startEpoch || Date.now();
+  activeShareCode = s.shareCode || null;
+
+  renderHistory();
+  renderDisplay();
+
+  if (sharedGame) {
+    beatEl.textContent = "Beat " +
+      (sharedGame.outcome.solved ? fmtTime(sharedGame.outcome.timeSec) : sharedGame.outcome.score);
+    beatEl.classList.add("show");
+  }
+
+  if (s.phase === "won") {
+    if (lastOutcome) endGame(); // re-renders the result screen
+    return true;
+  }
+
+  if (s.phase === "play") {
+    layoutBorder();
+    resetBorder();
+    const elapsed = (Date.now() - startEpoch) / 1000;
+    borderPath.style.animationDuration = borderDurationSec + "s";
+    if (elapsed < borderDurationSec) {
+      // Resume the green bar partway through via a negative delay.
+      borderPath.style.animationDelay = "-" + elapsed + "s";
+    }
+    document.body.classList.remove("time-up");
+    document.body.classList.add("playing");
+    runTimerLoop();
+    if (elapsed >= borderDurationSec) {
+      // Time already up: lock the red ring and reveal submit.
+      borderPath.style.animation = "none";
+      borderPath.style.stroke = "var(--red)";
+      borderPath.style.strokeDashoffset = "0";
+      document.body.classList.add("time-up");
+    }
+    return true;
+  }
+
+  // phase === "select": target rolled, some numbers maybe drawn, still picking.
+  setArrowsEnabled(true);
+  return true;
 }
 
 let toastTimer = null;
@@ -1033,7 +1180,7 @@ function loadFromURL() {
 
   const code = p.get("g");
   if (code) {
-    try { data = decodeGame(code); } catch (e) { data = null; }
+    try { data = decodeGame(code); activeShareCode = code; } catch (e) { data = null; }
   }
   if (!data) {
     const t = parseInt(p.get("t"), 10);
@@ -1136,6 +1283,7 @@ function rollTarget() {
       if (i === reels.length - 1) {
         isRollingTarget = false;
         setArrowsEnabled(true); // numbers can be drawn now the target exists
+        saveState(); // persist the rolled target
       }
     }, stopDelays[i]);
   });
@@ -1163,7 +1311,18 @@ renderDisplay();
 renderHistory();
 setArrowsEnabled(false); // can't draw numbers until a target is generated
 layoutBorder();
-loadFromURL();
+
+// On load: restore an in-progress game unless the URL points at a *different*
+// shared puzzle (a fresh challenge link). Otherwise open whatever the URL has.
+(function init() {
+  const urlG = new URLSearchParams(location.search).get("g");
+  const saved = readSave();
+  if (saved && (!urlG || urlG === saved.shareCode)) {
+    if (restoreState(saved)) return;
+  }
+  if (urlG && saved && urlG !== saved.shareCode) clearSave();
+  loadFromURL();
+})();
 </script>
 </body>
 </html>
