@@ -185,18 +185,17 @@
     display: flex;
     max-height: 4em;
     overflow: hidden;
-    transition: transform 0.08s, opacity 0.5s ease, max-height 0.8s ease, padding 0.8s ease;
+    transition: transform 0.08s, opacity 0.5s ease, max-height 0.8s ease-in-out, padding 0.8s ease-in-out;
   }
   .arrow svg { width: var(--size-ui); height: auto; display: block; }
   .arrow:hover { transform: scale(1.25); }
   .arrow:active { transform: scale(0.9); }
   .arrow:disabled { opacity: 0.2; cursor: default; transform: none; } /* non-clickable */
-  /* Entrance: arrows fade out first (numbers stay put), then collapse as the
-     numbers rise, so nothing snaps. */
+  /* Entrance: arrows fade out first (numbers stay put). Their collapse during
+     the rise is driven from JS (pinned to natural height) so it runs in sync
+     with the calculator opening — see collapseArrows(). */
   body.entering .arrow,
   body.playing .arrow { opacity: 0; pointer-events: none; }
-  body.raised .arrow,
-  body.playing .arrow { max-height: 0; padding-top: 0; padding-bottom: 0; }
   .slot-num {
     font-size: var(--size-number);
     font-weight: 700;
@@ -933,6 +932,45 @@ function showError() {
 }
 
 /* ---------------- Round flow ---------------- */
+// Collapse the (already faded) arrows from their natural height to zero, in
+// sync with the calculator opening, so the numbers and target each travel
+// straight to their final spots with no two-step or dip.
+function collapseArrows() {
+  const arrows = document.querySelectorAll(".arrow");
+  arrows.forEach((a) => {
+    const h = a.offsetHeight;
+    a.style.transition = "none";
+    a.style.maxHeight = h + "px"; // pin current height
+  });
+  void document.body.offsetHeight; // commit the pinned heights
+  arrows.forEach((a) => {
+    a.style.transition = ""; // back to the CSS transition
+    a.style.maxHeight = "0px";
+    a.style.paddingTop = "0";
+    a.style.paddingBottom = "0";
+  });
+}
+function collapseArrowsInstant() {
+  document.querySelectorAll(".arrow").forEach((a) => {
+    a.style.transition = "none";
+    a.style.maxHeight = "0px";
+    a.style.paddingTop = "0";
+    a.style.paddingBottom = "0";
+    void a.offsetHeight;
+    a.style.transition = "";
+  });
+}
+function resetArrows() {
+  document.querySelectorAll(".arrow").forEach((a) => {
+    a.style.transition = "none";
+    a.style.maxHeight = "";
+    a.style.paddingTop = "";
+    a.style.paddingBottom = "";
+    void a.offsetHeight;
+    a.style.transition = "";
+  });
+}
+
 // Immediate play — no entrance (used by shared links and refresh-restore).
 function startPlaying() {
   if (document.body.classList.contains("playing")) return;
@@ -941,6 +979,7 @@ function startPlaying() {
   initAvailable();
   document.body.classList.remove("time-up", "entering", "raised");
   document.body.classList.add("playing");
+  collapseArrowsInstant();
   startTimer();
   startBorderDrain(0);
   saveState();
@@ -969,6 +1008,7 @@ function beginEntrance() {
   const FADE_MS = 500;   // calculator fades in
   entranceTimers.push(setTimeout(() => {
     document.body.classList.add("raised");         // numbers rise
+    collapseArrows();                              // arrows collapse in sync
     entranceTimers.push(setTimeout(() => {
       document.body.classList.add("playing");      // calc fades in immediately
       entranceTimers.push(setTimeout(() => {
@@ -984,6 +1024,7 @@ function backToHome() {
   entranceTimers.forEach(clearTimeout);
   entranceTimers = [];
   document.body.classList.remove("playing", "won", "time-up", "entering", "raised");
+  resetArrows();
   stopTimer();
   resetSlots();
   history = [];
@@ -1213,6 +1254,7 @@ function restoreState(s) {
     const elapsed = (Date.now() - startEpoch) / 1000;
     document.body.classList.remove("time-up", "entering", "raised");
     document.body.classList.add("playing");
+    collapseArrowsInstant();
     runTimerLoop();
     if (elapsed >= borderDurationSec) {
       // Time already up: lock the red ring and reveal submit.
