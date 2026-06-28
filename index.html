@@ -227,9 +227,9 @@
      numbers up, then fades in (playing). */
   body.entering .calc,
   body.playing .calc { display: flex; }
-  body.raised .calc,
-  body.playing .calc { max-height: 80vh; }
   body.playing .calc { opacity: 1; }
+  /* max-height during the rise is set from JS to the calc's real content height
+     so the rise stays 1:1 in sync with the arrow collapse. */
 
   /* Equation tape: about three faded previous lines sit above the input line,
      with a white gradient fading the oldest toward the top. */
@@ -512,6 +512,7 @@ const displayValEl = displayEl.querySelector(".val");
 const keysEl = document.getElementById("keys");
 const historyEl = document.getElementById("history");
 const historyWrapEl = document.querySelector(".history-wrap");
+const calcEl = document.querySelector(".calc");
 const winLabelEl = document.getElementById("win-label");
 const winValueEl = document.getElementById("win-value");
 const winSubEl = document.getElementById("win-sub");
@@ -971,6 +972,24 @@ function resetArrows() {
   });
 }
 
+// Animate the calculator open to its real content height so the rise spans the
+// full duration (1:1), keeping it in sync with the arrow collapse.
+function raiseCalc() {
+  calcEl.style.maxHeight = calcEl.scrollHeight + "px";
+}
+function showCalcInstant() {
+  calcEl.style.transition = "none";
+  calcEl.style.maxHeight = "80vh";
+  void calcEl.offsetHeight;
+  calcEl.style.transition = "";
+}
+function resetCalc() {
+  calcEl.style.transition = "none";
+  calcEl.style.maxHeight = "";
+  void calcEl.offsetHeight;
+  calcEl.style.transition = "";
+}
+
 // Immediate play — no entrance (used by shared links and refresh-restore).
 function startPlaying() {
   if (document.body.classList.contains("playing")) return;
@@ -979,6 +998,7 @@ function startPlaying() {
   initAvailable();
   document.body.classList.remove("time-up", "entering", "raised");
   document.body.classList.add("playing");
+  showCalcInstant();
   collapseArrowsInstant();
   startTimer();
   startBorderDrain(0);
@@ -1003,14 +1023,16 @@ function beginEntrance() {
   saveState();
   entranceTimers.forEach(clearTimeout);
   entranceTimers = [];
-  const HOLD_MS = 3000;  // hold the full ring + 00:00 with arrows faded out
+  const HOLD_MS = 2000;  // hold the full ring + 00:00 with arrows faded out
   const RISE_MS = 800;   // numbers slide up into position
   const FADE_MS = 500;   // calculator fades in
   entranceTimers.push(setTimeout(() => {
     document.body.classList.add("raised");         // numbers rise
-    collapseArrows();                              // arrows collapse in sync
+    raiseCalc();                                   // calc opens 1:1 with...
+    collapseArrows();                              // ...the arrow collapse
     entranceTimers.push(setTimeout(() => {
       document.body.classList.add("playing");      // calc fades in immediately
+      calcEl.style.maxHeight = "80vh";             // allow the tape to expand
       entranceTimers.push(setTimeout(() => {
         startTimer();                              // timer starts after the fade
         startBorderDrain(0);                       // ring begins draining
@@ -1025,6 +1047,7 @@ function backToHome() {
   entranceTimers = [];
   document.body.classList.remove("playing", "won", "time-up", "entering", "raised");
   resetArrows();
+  resetCalc();
   stopTimer();
   resetSlots();
   history = [];
@@ -1254,6 +1277,7 @@ function restoreState(s) {
     const elapsed = (Date.now() - startEpoch) / 1000;
     document.body.classList.remove("time-up", "entering", "raised");
     document.body.classList.add("playing");
+    showCalcInstant();
     collapseArrowsInstant();
     runTimerLoop();
     if (elapsed >= borderDurationSec) {
