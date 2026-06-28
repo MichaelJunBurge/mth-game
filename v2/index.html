@@ -7,7 +7,7 @@
 <title>mth game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@300;500;700&display=swap" rel="stylesheet" />
 <style>
   :root {
     --bg: #ffffff;
@@ -341,19 +341,23 @@
   .display.win .val { color: var(--green); }
   .display.error .val { color: var(--red); }
 
+  /* v2: 3x3 keypad. Widen so the outer columns' centres line up with the first
+     and last of the six numbers (1/12 .. 11/12), and match the column pitch
+     vertically so the keys are evenly spaced both ways. */
   .keys {
-    width: 100%;
+    width: 125%;
+    margin-left: -12.5%;
     display: grid;
-    grid-template-columns: repeat(3, 1fr); /* v2: operators in a 3x3 grid */
-    row-gap: 0.9em;
+    grid-template-columns: repeat(3, 1fr);
+    row-gap: calc(var(--app-w) * 0.31);
     justify-items: center;
   }
   .key {
     background: none;
     border: none;
     font-family: var(--font);
-    font-size: var(--size-ui);
-    font-weight: 500;
+    font-size: var(--size-number); /* same size as the six numbers */
+    font-weight: 300;              /* light */
     color: var(--ink);
     cursor: pointer;
     padding: 0.15em 0.4em;
