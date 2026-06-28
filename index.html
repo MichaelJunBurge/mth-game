@@ -17,7 +17,13 @@
     --font: "Roboto Mono", ui-monospace, "Courier New", monospace;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  /* Lock the viewport: the page itself never scrolls or rubber-bands. Only the
+     expanded calculation tape scrolls, internally. */
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
   html { background: #ffffff; }
   body {
     margin: 0;
@@ -115,7 +121,7 @@
      raw viewport. */
   .content {
     width: 60vw;
-    max-width: 440px;
+    max-width: 310px;
     container-type: inline-size;
     display: flex;
     flex-direction: column;
@@ -235,7 +241,9 @@
   .history-wrap.expanded::after { display: none; }
   .history-wrap.expanded .history {
     height: auto;
-    overflow: visible;
+    max-height: 32vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     justify-content: flex-start;
   }
 
