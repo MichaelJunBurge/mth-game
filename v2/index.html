@@ -2,8 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- viewport-fit=cover: let the page (and the green ring) paint all the way to
+     the physical screen edges, into the notch / home-indicator safe areas. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="color-scheme" content="light" />
+<!-- Added-to-home-screen runs fullscreen, so the ring wraps the whole screen. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>mth game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -97,7 +103,7 @@
   .timer {
     position: fixed;
     top: 5vh;
-    top: 5dvh;
+    top: calc(5dvh + env(safe-area-inset-top, 0px));
     left: 50%;
     transform: translateX(-50%);
     text-align: center;
@@ -119,7 +125,7 @@
   .submit {
     position: fixed;
     bottom: 5vh;
-    bottom: 5dvh;
+    bottom: calc(5dvh + env(safe-area-inset-bottom, 0px));
     left: 0;
     right: 0;
     text-align: center;
@@ -164,8 +170,8 @@
   }
   .nav-icon:hover { opacity: 1; }
   .nav-icon:active { transform: translateX(-50%) scale(0.9); }
-  .nav-top { top: 5vh; top: 5dvh; }
-  .nav-bottom { bottom: 5vh; bottom: 5dvh; }
+  .nav-top { top: 5vh; top: calc(5dvh + env(safe-area-inset-top, 0px)); }
+  .nav-bottom { bottom: 5vh; bottom: calc(5dvh + env(safe-area-inset-bottom, 0px)); }
   body.entering .nav-icon,
   body.playing .nav-icon,
   body.won .nav-icon { opacity: 0; pointer-events: none; }
@@ -177,7 +183,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    /* Keep content clear of the notch / home indicator (0 on desktop). */
+    padding: calc(24px + env(safe-area-inset-top, 0px))
+             calc(24px + env(safe-area-inset-right, 0px))
+             calc(24px + env(safe-area-inset-bottom, 0px))
+             calc(24px + env(safe-area-inset-left, 0px));
   }
   /* One centered column whose width is the shared --app-w. Spacing is on the
      children (not a flex gap) so the collapsed calculator adds no gap on home. */
@@ -879,6 +889,11 @@ function layoutBorder() {
   );
 }
 window.addEventListener("resize", layoutBorder);
+// Mobile: the visible area changes as the address bar shows/hides — keep the
+// ring framed to it rather than a stale window.innerHeight.
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", layoutBorder);
+}
 
 // When the green ring finishes draining, a red ring grows for one rotation
 // (same duration as the green lap); when that finishes, it stays solid red.
