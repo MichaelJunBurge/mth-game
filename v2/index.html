@@ -1441,26 +1441,43 @@ function flushAnswerToTape() {
   }
 }
 
+// The goal a submission is judged against: 0 if the target was folded into the
+// working (winding backwards to zero), otherwise the target itself.
+function currentGoal() {
+  const targetUsed = !available.some((e) => e.isTarget);
+  return targetUsed ? 0 : currentTarget;
+}
+
 function finishSolved() {
   flushAnswerToTape();
-  lastOutcome = { solved: true, timeSec: elapsedSeconds(), score: currentTarget, distance: 0 };
+  lastOutcome = { solved: true, timeSec: elapsedSeconds(), score: currentTarget, goal: currentGoal(), distance: 0 };
   endGame();
 }
 
 function finishSubmitted() {
   flushAnswerToTape();
   const score = computeScore();
+  // If they used the target, score by how close to 0 they got (they've already
+  // built the target in); otherwise by how close to the target they got.
+  const goal = currentGoal();
   lastOutcome = {
     solved: false,
     timeSec: elapsedSeconds(),
     score: score,
-    distance: Math.abs(score - currentTarget),
+    goal: goal,
+    distance: Math.abs(score - goal),
   };
   endGame();
 }
 
 function fmtResult(o) {
   return o.solved ? fmtTime(o.timeSec) : String(o.score);
+}
+
+// The number a result was judged against (0 when the target was used). Older
+// saved/shared outcomes have no goal field, so fall back to the target.
+function goalOf(o) {
+  return o && o.goal !== undefined && o.goal !== null ? o.goal : currentTarget;
 }
 
 // Compare my result to the opponent's: closer to target wins; ties broken by a
@@ -1489,8 +1506,8 @@ function endGame() {
     winSubEl.textContent = me.solved
       ? "Solved it"
       : me.distance === 0
-      ? "Bang on " + currentTarget
-      : me.score + " · " + me.distance + " from " + currentTarget;
+      ? "Bang on " + goalOf(me)
+      : me.score + " · " + me.distance + " from " + goalOf(me);
 
     // Reveal the opponent's working and result.
     const title = document.createElement("div");
@@ -1511,8 +1528,8 @@ function endGame() {
     winSubEl.textContent = me.solved
       ? ""
       : me.distance === 0
-      ? "Bang on the target!"
-      : me.distance + " from " + currentTarget;
+      ? (goalOf(me) === 0 ? "Bang on zero!" : "Bang on the target!")
+      : me.distance + " from " + goalOf(me);
   }
 
   document.body.classList.add("won");
@@ -1689,6 +1706,7 @@ function sharePuzzle() {
       solved: lastOutcome.solved,
       timeSec: Math.round(lastOutcome.timeSec * 10) / 10,
       score: lastOutcome.score,
+      goal: lastOutcome.goal,
       distance: lastOutcome.distance,
     },
   };
@@ -1831,6 +1849,7 @@ function loadFromURL() {
         solved: !!data.o.solved,
         timeSec: Number(data.o.timeSec) || 0,
         score: Number(data.o.score),
+        goal: data.o.goal === undefined ? undefined : Number(data.o.goal),
         distance: Number(data.o.distance),
         working: data.w || [],
       },
