@@ -262,6 +262,26 @@
   .pad-undo:hover { opacity: 0.7; }
   .pad-undo:active { transform: translateX(-50%) scale(0.9); }
 
+  /* On-screen Submit — appears (green) between the calculator and the dots once
+     every number is used. Top is set in JS to the same midpoint as the x. */
+  .submit {
+    position: fixed;
+    left: 50%;
+    top: 84dvh;
+    transform: translate(-50%, -50%);
+    z-index: 42;
+    background: none;
+    border: none;
+    font-family: var(--font);
+    font-size: var(--size-ui);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--green);
+    cursor: pointer;
+    display: none;
+  }
+  body.playing.all-used:not(.on-pad):not(.del-armed):not(.won):not(.menu-open) .submit { display: block; }
+
   /* Side arrows. Shown on pointer/wide screens, and always on the sketchpad
      (there, the surface is for drawing so you can't swipe to leave). */
   .pager-arrow {
@@ -740,6 +760,9 @@
   <div id="timer" class="timer">00:00</div>
   <div id="beat" class="beat"></div>
 
+  <!-- Appears between the calculator and the dots once every number is used. -->
+  <button id="submit" class="submit">Submit</button>
+
   <!-- Home-screen nav: hamburger (menu) up top where the timer sits during play,
        profile placeholder at the bottom where Submit sits. Icons, not words. -->
   <button id="nav-menu" class="nav-icon nav-top" aria-label="Menu">
@@ -816,7 +839,9 @@
   <div id="menu" class="menu">
     <button id="menu-close" class="menu-x" aria-label="Close menu">&times;</button>
     <div class="menu-view menu-main">
-      <button id="menu-submit" class="menu-btn">Submit</button>
+      <button id="menu-submit" class="menu-btn">Quit</button>
+      <button id="menu-resume" class="menu-btn">Resume</button>
+      <button id="menu-reset" class="menu-btn">Reset</button>
       <button id="menu-home" class="menu-btn">Home</button>
       <button id="menu-help" class="menu-btn">Help</button>
       <button id="menu-auto" class="menu-btn">Auto (=) on</button>
@@ -881,6 +906,7 @@ const winHomeBtn = document.getElementById("win-home");
 const winShareBtn = document.getElementById("win-share");
 const toastEl = document.getElementById("toast");
 const beatEl = document.getElementById("beat");
+const submitEl = document.getElementById("submit");
 const sketchEl = document.getElementById("sketch");
 const sketchCtx = sketchEl.getContext("2d");
 const dotsEl = document.getElementById("dots");
@@ -1213,10 +1239,15 @@ function refreshSlots() {
     const e = available.find((x) => x.slotIndex === i);
     slotParts(i).num.classList.toggle("used", slotUsed[i] || !!(e && e.tentative));
   }
+  document.body.classList.toggle("all-used", allUsedUp());
 }
 
-// True once all six numbers have been used in the active calculator.
-function allSixUsed() { return SLOT_COUNT > 0 && slotUsed.every(Boolean); }
+// True once everything's been combined into one line: all six numbers used and
+// no freed result chips left (the target is optional).
+function allUsedUp() {
+  if (SLOT_COUNT === 0 || !slotUsed.every(Boolean)) return false;
+  return !available.some((e) => e.slotIndex === null && !e.isTarget && e !== lineEntry && !e.tentative);
+}
 
 // The generated-numbers row shows only FREED results (as reminders). A result
 // that's currently on the line, or a number tentatively placed in the current
@@ -1536,6 +1567,7 @@ function positionPageDel() {
     mid = (window.innerHeight * 0.78 + dotsTop) / 2; // sketchpad has no keypad
   }
   del.style.top = Math.round(mid) + "px";
+  submitEl.style.top = Math.round(mid) + "px"; // submit shares the x's midpoint
   positionPadUndo();
 }
 // Sketchpad undo button: its gap to the dots equals the dots' gap to the bottom.
@@ -2327,15 +2359,22 @@ function openMenu() {
   } else if (replaying) {
     pbPause(); // freeze the shared-intro playback while the menu is open
   }
-  // Submit lives here now: only on a calculator page (not the sketchpad), and it
-  // submits whichever page you were on when you opened the menu.
+  // Quit/Submit: end the game with the page you opened the menu on. It's "Quit"
+  // until every number is used, then becomes a green "Submit". Calc pages only.
   const sub = document.getElementById("menu-submit");
   if (playing && pageIndex >= 1) {
+    const used = allUsedUp();
     sub.style.display = "";
-    sub.classList.toggle("ready", allSixUsed());
+    sub.textContent = used ? "Submit" : "Quit";
+    sub.classList.toggle("ready", used);
   } else {
     sub.style.display = "none";
   }
+  // Shared games swap "Home" (which would lose the link) for Resume + Reset.
+  const shared = !!sharedGame;
+  document.getElementById("menu-resume").style.display = shared ? "" : "none";
+  document.getElementById("menu-reset").style.display = shared ? "" : "none";
+  document.getElementById("menu-home").style.display = shared ? "none" : "";
   menuEl.classList.remove("help-open");
   document.body.classList.add("menu-open");
 }
@@ -2362,12 +2401,39 @@ function closeMenu(resume) {
   menuPausedElapsed = null;
 }
 
+// Restart a shared puzzle from its intro (so the link isn't lost on Reset/Home).
+function restartShared() {
+  if (!sharedGame) return;
+  const sg = sharedGame, draws = introDraws.slice(), code = activeShareCode;
+  if (draws.length === SLOT_COUNT) {
+    playIntro(sg.t, sg.n, draws);   // backToHome inside clears shared state
+  } else {
+    backToHome();
+    currentTarget = sg.t;
+    String(sg.t).padStart(3, "0").split("").forEach((d, i) => { if (reels[i]) { reels[i].textContent = d; reels[i].className = "reel"; } });
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const { up, down, num } = slotParts(i);
+      num.textContent = sg.n[i]; num.className = "slot-num filled"; up.disabled = true; down.disabled = true;
+      slotValues[i] = sg.n[i];
+    }
+    startPlaying();
+  }
+  activeShareCode = code;
+  sharedGame = sg;
+  borderDurationSec = sg.s && sg.s > 0 ? sg.s : 120;
+  beatEl.textContent = "Beat " + (sg.outcome.solved ? fmtTime(sg.outcome.timeSec) : sg.outcome.score);
+  beatEl.classList.add("show");
+}
+
 timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-profile").addEventListener("click", () => showToast("Profiles & leaderboards coming soon"));
 document.getElementById("menu-close").addEventListener("click", () => closeMenu(true));
 document.getElementById("menu-submit").addEventListener("click", submitFromMenu);
+document.getElementById("menu-resume").addEventListener("click", () => closeMenu(true));
+document.getElementById("menu-reset").addEventListener("click", () => { closeMenu(false); restartShared(); });
 document.getElementById("menu-home").addEventListener("click", () => { closeMenu(false); goHome(); });
+submitEl.addEventListener("click", finishSubmitted);
 document.getElementById("menu-help").addEventListener("click", () => menuEl.classList.add("help-open"));
 document.getElementById("menu-help-back").addEventListener("click", () => menuEl.classList.remove("help-open"));
 document.getElementById("menu-theme").addEventListener("click", toggleTheme);
