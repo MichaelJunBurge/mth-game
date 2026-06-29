@@ -179,7 +179,12 @@
     background-size: 26px 26px;
   }
   body.on-pad .sketch { display: block; }
-  body.on-pad .stage { display: none; }
+  /* On the pad, keep the target + six numbers showing (fixed, like on the calc
+     pages) — only the calculator itself goes away. The stage floats above the
+     canvas but is click-through so you can draw anywhere. calcwrap stays laid
+     out (visibility:hidden) so the numbers don't shift between pages. */
+  body.on-pad .stage { z-index: 31; pointer-events: none; }
+  body.on-pad .calcwrap { visibility: hidden; }
 
   /* Page dots — one per page (pad + each calculator); the current one is solid. */
   .dots {
@@ -269,7 +274,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    transform-origin: center center; /* shrink toward its own centre */
+    transform-origin: center bottom; /* select-shrink keeps the bottom line put */
   }
   .calcwrap.dragging { transition: none; }
   .calcwrap.snapback { transition: transform 0.18s ease; }
@@ -278,6 +283,7 @@
   body.del-armed .calcwrap { transform: scale(0.93); transition: transform 0.2s ease; }
 
   .stage {
+    position: relative; /* so it can sit above the sketchpad canvas on the pad */
     min-height: 100vh;
     min-height: 100dvh; /* mobile: the *visible* height, so the block centres
                            evenly top-to-bottom instead of sitting low */
@@ -519,6 +525,19 @@
   .key:active { transform: scale(0.9); }
   .key.clear { color: var(--red); }
   .key.equals { color: var(--green); }
+
+  /* Expanding the calculations compacts the keypad — button spacing halved both
+     vertically and horizontally — and pulls the 00 line + tape inward so they
+     stay aligned with the keypad's now-inner right column (17/24). */
+  body.tape-open .keys {
+    width: 62.5%;
+    margin-left: 18.75%;
+    row-gap: calc(var(--app-w) * 0.0675);
+  }
+  body.tape-open .display,
+  body.tape-open .history {
+    padding-right: calc(100% * 7 / 24 - 0.3em);
+  }
 
   /* Result screen — same minimal system as the rest of the app. The result
      value uses the target (hero) size; labels and working use the UI size. */
@@ -2421,6 +2440,7 @@ targetEl.addEventListener("keydown", (e) => {
 // Collapse the tape and release the layout pin.
 function collapseTape() {
   historyWrapEl.classList.remove("expanded");
+  document.body.classList.remove("tape-open");
   stageEl.style.alignItems = "";
   document.querySelector(".content").style.marginTop = "";
 }
@@ -2437,6 +2457,7 @@ historyWrapEl.addEventListener("click", () => {
   stageEl.style.alignItems = "flex-start";    // anchor the top so it grows down
   content.style.marginTop = Math.max(0, offset) + "px";
   historyWrapEl.classList.add("expanded");
+  document.body.classList.add("tape-open");   // compact keypad to free room
 });
 
 buildSlots();
