@@ -225,13 +225,16 @@
   body.playing .slot-num.filled:not(.used) { cursor: pointer; }
 
   /* v2: generated-numbers row — clickable chips for results made so far */
+  /* Generated-results row: each chip sits in a 1/6-width column, centred as a
+     group, so the spacing matches the six numbers above. */
   .generated {
     width: 100%;
     margin-top: 1.6vh;
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: calc(100% / 6);
     justify-content: center;
-    gap: 0.7em;
+    justify-items: center;
   }
   .generated:empty { display: none; } /* no gap until a result exists */
   .gen-chip {
@@ -248,6 +251,8 @@
   }
   .gen-chip:hover { transform: scale(1.12); }
   .gen-chip:active { transform: scale(0.92); }
+  /* faded while the result is still echoed on the calculator line */
+  .gen-chip.faded { opacity: 0.2; pointer-events: none; cursor: default; }
 
   /* Calculator — hidden until all six numbers are drawn.
      The 5 key columns are widened to span the 6 numbers' centres
@@ -891,7 +896,8 @@ const KEYS = [
   "()", "c", "=",
 ];
 let expr = "";
-let justEvaluated = false; // kept for save/restore compatibility (unused in v2)
+let justEvaluated = false; // main line is showing a fresh result (R alone)
+let pendingActive = false; // the latest result is still echoed on the main line
 let carry = null;          // kept for save/restore compatibility (unused in v2)
 
 function buildKeys() {
@@ -924,6 +930,8 @@ function clearAll() {
   renderHistory();
   historyWrapEl.classList.remove("expanded");
   expr = "";
+  justEvaluated = false;
+  pendingActive = false;
   renderDisplay();
   // Fresh canvas: restore the six numbers and the available pool.
   for (let i = 0; i < SLOT_COUNT; i++) {
@@ -943,40 +951,45 @@ function initAvailable() {
 }
 
 // Clickable chips for every result made so far — the "generated numbers" row
-// that sits just under the six numbers.
+// that sits just under the six numbers. The latest result is faded while it's
+// still echoed on the calculator line (pendingActive); faded chips aren't
+// clickable until they're lifted up.
 function renderGenerated() {
   generatedEl.innerHTML = "";
-  available.forEach((e) => {
-    if (e.slotIndex !== null || e.isTarget) return; // results only
+  const results = available.filter((e) => e.slotIndex === null && !e.isTarget);
+  results.forEach((e, idx) => {
+    const onLine = pendingActive && idx === results.length - 1;
     const chip = document.createElement("button");
-    chip.className = "gen-chip";
+    chip.className = "gen-chip" + (onLine ? " faded" : "");
     chip.textContent = e.value;
-    chip.addEventListener("click", () => insertValue(e.value));
+    if (!onLine) chip.addEventListener("click", () => insertValue(e.value));
     generatedEl.appendChild(chip);
   });
 }
 
-// A number can only follow the start, an operator, or an open bracket — never
-// straight after another number (that would just glue the digits together).
-function canInsertNumber() {
+// True when the line is expecting a value (start / after an operator or "(").
+function expectingValue() {
   if (expr === "") return true;
   return /[+\-x÷^(]/.test(expr[expr.length - 1]);
 }
 
 // Append a number's value to the calculation line (clicked from the board).
+// Two numbers in a row auto-insert a "x" between them.
 function insertValue(v) {
-  if (!canInsertNumber()) return; // must put an operator between two numbers
+  if (justEvaluated) justEvaluated = false; // continuing from a result
+  if (!expectingValue()) expr += "x";       // auto-multiply between numbers
   expr += String(v);
   renderDisplay();
   saveState();
 }
 
 // One bracket button: closes an open "(" when we're right after a value,
-// otherwise opens a new "(".
+// otherwise opens a new "(" (auto-multiplying if it follows a value).
 function nextBracket() {
   const open = (expr.match(/\(/g) || []).length - (expr.match(/\)/g) || []).length;
   const last = expr[expr.length - 1] || "";
-  return open > 0 && /[0-9.)]/.test(last) ? ")" : "(";
+  if (open > 0 && /[0-9.)]/.test(last)) return ")";
+  return /[0-9.)]/.test(last) ? "x(" : "(";
 }
 
 function renderDisplay() {
@@ -990,10 +1003,37 @@ function renderDisplay() {
 }
 
 function pressKey(label) {
-  if (label === "c") { expr = ""; renderDisplay(); saveState(); return; }
-  if (label === "=") { evaluate(); saveState(); return; }
+  if (label === "c") {
+    // On a fresh result, clear lifts it up (like a second =). Otherwise it
+    // wipes the line and frees the result that was echoed on it.
+    if (justEvaluated) { liftResult(); return; }
+    expr = "";
+    if (pendingActive) { pendingActive = false; renderGenerated(); } // un-fade
+    renderDisplay();
+    saveState();
+    return;
+  }
+  if (label === "=") { handleEquals(); return; }
+  justEvaluated = false; // an operator/bracket continues from a result
   if (label === "()") { expr += nextBracket(); renderDisplay(); saveState(); return; }
   expr += label === "√" ? "√(" : label;
+  renderDisplay();
+  saveState();
+}
+
+function handleEquals() {
+  if (justEvaluated) { liftResult(); return; } // second = sends the result up
+  evaluate();
+}
+
+// Send the result shown on the main line up into the working tape and free its
+// chip (full opacity, now usable).
+function liftResult() {
+  if (expr !== "") { history.push(expr); renderHistory(); }
+  expr = "";
+  justEvaluated = false;
+  pendingActive = false;
+  renderGenerated();
   renderDisplay();
   saveState();
 }
@@ -1042,10 +1082,14 @@ function evaluate() {
   available.push({ value: rounded, slotIndex: null, isTarget: false });
   lastResult = rounded;
 
-  history.push(expr);   // working line
+  // The equation goes up into the tape; the answer drops onto the main line AND
+  // appears (faded) as a new chip. A second = / clear lifts it up and frees it.
+  history.push(expr);
   renderHistory();
-  renderGenerated();    // the new result becomes a clickable chip
-  expr = "";            // clear the line for the next step
+  expr = String(rounded);
+  justEvaluated = true;
+  pendingActive = true;
+  renderGenerated();
   renderDisplay();
 
   // Round complete: reach the target with all six numbers used, OR work down
@@ -1196,6 +1240,7 @@ function backToHome() {
   historyWrapEl.classList.remove("expanded");
   expr = "";
   justEvaluated = false;
+  pendingActive = false;
   carry = null;
   renderDisplay();
   clearSave();
@@ -1330,6 +1375,7 @@ function saveState() {
     available: available,
     expr: expr,
     justEvaluated: justEvaluated,
+    pendingActive: pendingActive,
     carry: carry,
     lastResult: lastResult,
     lastOutcome: lastOutcome,
@@ -1383,6 +1429,7 @@ function restoreState(s) {
   available = s.available ? s.available.slice() : [];
   expr = s.expr || "";
   justEvaluated = !!s.justEvaluated;
+  pendingActive = !!s.pendingActive;
   carry = s.carry === undefined ? null : s.carry;
   lastResult = s.lastResult === undefined ? null : s.lastResult;
   lastOutcome = s.lastOutcome || null;
