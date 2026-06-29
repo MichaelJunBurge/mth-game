@@ -750,6 +750,18 @@
     text-align: center;
   }
   .help-text b { font-weight: 700; }
+
+  /* Confetti overlay — above the win screen, never blocks taps. */
+  .confetti {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 65;
+    pointer-events: none;
+    display: none;
+  }
+  body.confetti-on .confetti { display: block; }
 </style>
 </head>
 <body>
@@ -762,6 +774,9 @@
 
   <!-- Appears between the calculator and the dots once every number is used. -->
   <button id="submit" class="submit">Submit</button>
+
+  <!-- Confetti overlay (win / beat). -->
+  <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
 
   <!-- Home-screen nav: hamburger (menu) up top where the timer sits during play,
        profile placeholder at the bottom where Submit sits. Icons, not words. -->
@@ -1084,7 +1099,7 @@ function layoutBorder() {
     `L${inset} ${h - inset} L${inset} ${inset} Z`
   );
 }
-function onViewportResize() { layoutBorder(); sizeSketch(); positionPageDel(); }
+function onViewportResize() { layoutBorder(); sizeSketch(); positionPageDel(); sizeConfetti(); }
 window.addEventListener("resize", onViewportResize);
 // Mobile: the visible area changes as the address bar shows/hides — keep the
 // ring framed to it rather than a stale window.innerHeight.
@@ -1960,6 +1975,7 @@ function backToHome() {
   stopRoll();
   stopDraws();
   pbStop();
+  stopConfetti();
   replaying = false;
   introT0 = null;
   introDraws = [];
@@ -2076,10 +2092,12 @@ function endGame() {
   const me = lastOutcome;
   winTheirEl.classList.remove("show");
   winTheirEl.innerHTML = "";
+  let celebrate = !!me.solved; // completing the puzzle always celebrates
 
   if (sharedGame) {
     const them = sharedGame.outcome;
     const v = verdict(me, them);
+    if (v === "win") celebrate = true; // ...so does beating the sender
     winLabelEl.textContent = v === "win" ? "You win" : v === "lose" ? "You lose" : "Tie";
     winValueEl.textContent = fmtResult(me);
     winSubEl.textContent = me.solved
@@ -2113,6 +2131,78 @@ function endGame() {
 
   document.body.classList.add("won");
   saveState();
+  if (celebrate) launchConfetti();
+}
+
+/* ---------------- Confetti (win / beat) ---------------- */
+const confettiEl = document.getElementById("confetti");
+const confettiCtx = confettiEl.getContext("2d");
+const CONFETTI_COLORS = ["#ff5252", "#ffb142", "#fdd835", "#26de81", "#2bcbba", "#45aaf2", "#a55eea", "#fd79a8", "#00d2d3", "#ff9ff3", "#ff6b6b", "#54a0ff"];
+let confettiParts = [], confettiRAF = null, confettiUntil = 0, confettiDPR = 1;
+
+function sizeConfetti() {
+  confettiDPR = window.devicePixelRatio || 1;
+  confettiEl.width = Math.round(window.innerWidth * confettiDPR);
+  confettiEl.height = Math.round(window.innerHeight * confettiDPR);
+  confettiEl.style.width = window.innerWidth + "px";
+  confettiEl.style.height = window.innerHeight + "px";
+}
+// Two cannons just off the left/right edges fire small confetti toward the
+// centre (near the score), which then drifts slowly down.
+function launchConfetti() {
+  sizeConfetti();
+  const W = window.innerWidth, H = window.innerHeight, cy = H * 0.42;
+  confettiParts = [];
+  [-1, 1].forEach((side) => {
+    const ox = side === -1 ? -12 : W + 12;
+    const base = side === -1 ? -Math.PI * 0.25 : -Math.PI * 0.75; // up-right / up-left
+    for (let k = 0; k < 70; k++) {
+      const ang = base + (Math.random() - 0.5) * Math.PI * 0.4;
+      const speed = 13 + Math.random() * 10;
+      confettiParts.push({
+        x: ox, y: cy + (Math.random() - 0.5) * H * 0.12,
+        vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
+        w: 3 + Math.random() * 4, h: 5 + Math.random() * 5,
+        color: CONFETTI_COLORS[randInt(0, CONFETTI_COLORS.length - 1)],
+        rot: Math.random() * Math.PI, vrot: (Math.random() - 0.5) * 0.3,
+        wob: Math.random() * Math.PI * 2,
+      });
+    }
+  });
+  confettiUntil = Date.now() + 9000;
+  document.body.classList.add("confetti-on");
+  if (!confettiRAF) confettiRAF = requestAnimationFrame(confettiFrame);
+}
+function confettiFrame() {
+  const W = window.innerWidth, H = window.innerHeight;
+  confettiCtx.setTransform(confettiDPR, 0, 0, confettiDPR, 0, 0);
+  confettiCtx.clearRect(0, 0, W, H);
+  let onscreen = 0;
+  for (const p of confettiParts) {
+    p.vy += 0.13;          // gentle gravity -> slow fall
+    p.vx *= 0.992; p.vy *= 0.992;
+    p.x += p.vx; p.y += p.vy; p.wob += 0.12; p.rot += p.vrot;
+    if (p.y < H + 24) onscreen++;
+    confettiCtx.save();
+    confettiCtx.translate(p.x + Math.sin(p.wob) * 2, p.y);
+    confettiCtx.rotate(p.rot);
+    confettiCtx.fillStyle = p.color;
+    confettiCtx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+    confettiCtx.restore();
+  }
+  if (onscreen > 0 && Date.now() < confettiUntil) {
+    confettiRAF = requestAnimationFrame(confettiFrame);
+  } else {
+    stopConfetti();
+  }
+}
+function stopConfetti() {
+  if (confettiRAF) cancelAnimationFrame(confettiRAF);
+  confettiRAF = null;
+  confettiParts = [];
+  confettiCtx.setTransform(confettiDPR, 0, 0, confettiDPR, 0, 0);
+  confettiCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  document.body.classList.remove("confetti-on");
 }
 
 /* ---------------- Persistence (survive a page refresh) ---------------- */
