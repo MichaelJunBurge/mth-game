@@ -973,14 +973,38 @@ function expectingValue() {
   return /[+\-x÷^(]/.test(expr[expr.length - 1]);
 }
 
-// Append a number's value to the calculation line (clicked from the board).
-// Two numbers in a row auto-insert a "x" between them.
+// A finished single operation that auto-evaluates (one step at a time):
+// "num op num" or "√(num)".
+function readyToAutoEval() {
+  return /^-?\d+(?:\.\d+)?[-+x÷^]-?\d+(?:\.\d+)?$/.test(expr) ||
+         /^√\(-?\d+(?:\.\d+)?\)$/.test(expr);
+}
+
+// Operand values in order — a "-" at the start, or after an operator / open
+// bracket, is a sign rather than subtraction, so negative results still match.
+function literalValues(s) {
+  const toks = s.match(/\d+(?:\.\d+)?|√\(|[-+x÷^()]/g) || [];
+  const vals = [];
+  let prev = "start", neg = false;
+  for (const t of toks) {
+    if (/^\d/.test(t)) { vals.push(neg ? -parseFloat(t) : parseFloat(t)); neg = false; prev = "num"; }
+    else if (t === "-") { if (prev === "start" || prev === "op" || prev === "open") neg = true; prev = "op"; }
+    else if (t === ")") { prev = "num"; }
+    else if (t === "(" || t === "√(") { prev = "open"; }
+    else { prev = "op"; } // + x ÷ ^
+  }
+  return vals;
+}
+
+// Click a number in from the board. Two numbers in a row auto-insert "x"; a
+// completed single operation auto-evaluates.
 function insertValue(v) {
-  if (justEvaluated) justEvaluated = false; // continuing from a result
-  if (!expectingValue()) expr += "x";       // auto-multiply between numbers
+  if (!expectingValue()) expr += "x";                  // auto-multiply
   expr += String(v);
+  if (/^√\(-?\d+(?:\.\d+)?$/.test(expr)) expr += ")";   // auto-close a sqrt
   renderDisplay();
-  saveState();
+  if (readyToAutoEval()) evaluate();                   // maths one step at a time
+  else saveState();
 }
 
 // One bracket button: closes an open "(" when we're right after a value,
@@ -1003,39 +1027,32 @@ function renderDisplay() {
 }
 
 function pressKey(label) {
-  if (label === "c") {
-    // On a fresh result, clear lifts it up (like a second =). Otherwise it
-    // wipes the line and frees the result that was echoed on it.
-    if (justEvaluated) { liftResult(); return; }
-    expr = "";
-    if (pendingActive) { pendingActive = false; renderGenerated(); } // un-fade
-    renderDisplay();
-    saveState();
+  if (label === "c") { commitLine(); return; }
+  if (label === "=") { handleEquals(); return; }
+  if (label === "()") { expr += nextBracket(); renderDisplay(); saveState(); return; }
+  if (label === "√") {
+    // sqrt of the current single value (one step), else start a sqrt group
+    if (/^-?\d+(?:\.\d+)?$/.test(expr)) { expr = "√(" + expr + ")"; renderDisplay(); evaluate(); }
+    else { expr += "√("; renderDisplay(); saveState(); }
     return;
   }
-  if (label === "=") { handleEquals(); return; }
-  justEvaluated = false; // an operator/bracket continues from a result
-  if (label === "()") { expr += nextBracket(); renderDisplay(); saveState(); return; }
-  expr += label === "√" ? "√(" : label;
+  expr += label; // binary operator: + - x ÷ ^
+  renderDisplay();
+  saveState();
+}
+
+// Clear the line; if a result was echoed on it (and not used), free its chip.
+function commitLine() {
+  expr = "";
+  if (pendingActive) { pendingActive = false; renderGenerated(); }
   renderDisplay();
   saveState();
 }
 
 function handleEquals() {
-  if (justEvaluated) { liftResult(); return; } // second = sends the result up
-  evaluate();
-}
-
-// Send the result shown on the main line up into the working tape and free its
-// chip (full opacity, now usable).
-function liftResult() {
-  if (expr !== "") { history.push(expr); renderHistory(); }
-  expr = "";
-  justEvaluated = false;
-  pendingActive = false;
-  renderGenerated();
-  renderDisplay();
-  saveState();
+  // A plain running result just commits (it's already in the working tape).
+  if (pendingActive && /^-?\d+(?:\.\d+)?$/.test(expr)) { commitLine(); return; }
+  evaluate(); // bracket / compound expressions
 }
 
 function evaluate() {
@@ -1060,7 +1077,7 @@ function evaluate() {
 
   // Strict rule check: every number literal must be one of the still-available
   // numbers (a drawn number, the target, or a result made earlier).
-  const literals = (expr.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+  const literals = literalValues(expr);
   const pool = available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: !!e.isTarget, taken: false }));
   const consumed = [];
   for (const lit of literals) {
@@ -1082,15 +1099,18 @@ function evaluate() {
   available.push({ value: rounded, slotIndex: null, isTarget: false });
   lastResult = rounded;
 
-  // The equation goes up into the tape; the answer drops onto the main line AND
-  // appears (faded) as a new chip. A second = / clear lifts it up and frees it.
+  // Working tape: the equation, then its answer on the next line (kept for good,
+  // so the history reads equation / answer / equation / answer).
   history.push(expr);
+  history.push(String(rounded));
   renderHistory();
+
+  // The answer becomes the running value on the line (and a faded chip).
   expr = String(rounded);
-  justEvaluated = true;
   pendingActive = true;
   renderGenerated();
   renderDisplay();
+  saveState();
 
   // Round complete: reach the target with all six numbers used, OR work down
   // from the target to exactly 0 (target used) with all six numbers used.
