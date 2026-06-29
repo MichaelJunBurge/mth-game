@@ -269,7 +269,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    transform-origin: center top; /* shrink keeps the top edge by the numbers */
+    transform-origin: center center; /* shrink toward its own centre */
   }
   .calcwrap.dragging { transition: none; }
   .calcwrap.snapback { transition: transform 0.18s ease; }
@@ -500,7 +500,7 @@
     margin-left: -12.5%;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    row-gap: calc(var(--app-w) * 0.27);
+    row-gap: calc(var(--app-w) * 0.135); /* compact keypad — more screen space */
     justify-items: center;
   }
   .key {
@@ -1420,7 +1420,7 @@ function loadCalc(snap) {
       if (e.slotIndex === null && !e.isTarget) { lineEntry = e; break; }
     }
   }
-  historyWrapEl.classList.remove("expanded");
+  collapseTape();
   renderHistory();
   refreshSlots();
   renderGenerated();
@@ -1585,7 +1585,7 @@ function redrawSketch() {
     sketchCtx.stroke();
   });
 }
-let drawingPad = false, padStroke = null;
+let drawingPad = false, padStroke = null, padDownX = 0, padDownY = 0, padDownT = 0;
 function padPoint(e) {
   padStroke.push({ x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight });
 }
@@ -1602,6 +1602,7 @@ function padSegment() {
 sketchEl.addEventListener("pointerdown", (e) => {
   if (pageIndex !== 0) return;
   e.preventDefault();
+  padDownX = e.clientX; padDownY = e.clientY; padDownT = Date.now();
   drawingPad = true;
   padStroke = [];
   padStrokes.push(padStroke);
@@ -1614,9 +1615,19 @@ sketchEl.addEventListener("pointermove", (e) => {
   padPoint(e);
   padSegment();
 });
-function endPadStroke() {
+function endPadStroke(e) {
   if (!drawingPad) return;
   drawingPad = false;
+  // A quick tap on the right edge (you can't swipe on the pad) jumps to the
+  // calculator on the right.
+  const moved = e ? Math.hypot(e.clientX - padDownX, e.clientY - padDownY) : 99;
+  if (e && moved < 12 && Date.now() - padDownT < 350 && padDownX > window.innerWidth * 0.72) {
+    padStrokes.pop();      // drop the stray dot
+    redrawSketch();
+    padStroke = null;
+    pageRight();
+    return;
+  }
   padStroke = null;
   saveState();
 }
@@ -1847,7 +1858,7 @@ function backToHome() {
   beatEl.classList.remove("show");
   renderHistory();
   renderGenerated();
-  historyWrapEl.classList.remove("expanded");
+  collapseTape();
   expr = "";
   lineSum = null;
   lineEntry = null;
@@ -2407,11 +2418,25 @@ targetEl.addEventListener("keydown", (e) => {
 });
 
 /* ---------------- Init ---------------- */
-// Tapping the tape reveals every line (and removes the fade); tap again to
-// collapse it back.
+// Collapse the tape and release the layout pin.
+function collapseTape() {
+  historyWrapEl.classList.remove("expanded");
+  stageEl.style.alignItems = "";
+  document.querySelector(".content").style.marginTop = "";
+}
+// Tapping the tape reveals every line; the column is pinned where it is so the
+// target + numbers stay put and the calculator grows DOWNWARD instead of pushing
+// them up. Tap again to collapse.
 historyWrapEl.addEventListener("click", () => {
   if (history.length === 0) return;
-  historyWrapEl.classList.toggle("expanded");
+  if (historyWrapEl.classList.contains("expanded")) { collapseTape(); return; }
+  const content = document.querySelector(".content");
+  const stageTop = stageEl.getBoundingClientRect().top;
+  const padTop = parseFloat(getComputedStyle(stageEl).paddingTop) || 0;
+  const offset = content.getBoundingClientRect().top - stageTop - padTop;
+  stageEl.style.alignItems = "flex-start";    // anchor the top so it grows down
+  content.style.marginTop = Math.max(0, offset) + "px";
+  historyWrapEl.classList.add("expanded");
 });
 
 buildSlots();
