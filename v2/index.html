@@ -298,8 +298,10 @@
     display: none;
   }
   .pager-arrow svg { width: calc(var(--size-ui) * 1.4); height: calc(var(--size-ui) * 1.4); display: block; }
-  .pager-arrow.left { left: calc(0.5vw + env(safe-area-inset-left, 0px)); }
-  .pager-arrow.right { right: calc(0.5vw + env(safe-area-inset-right, 0px)); }
+  /* Same gap from the side as the timer has from the top (5dvh), less the button
+     padding so the arrow glyph itself lands at that distance. */
+  .pager-arrow.left { left: calc(5dvh - 0.8em + env(safe-area-inset-left, 0px)); }
+  .pager-arrow.right { right: calc(5dvh - 0.8em + env(safe-area-inset-right, 0px)); }
   .pager-arrow:hover { opacity: 0.6; }
   .pager-arrow:disabled { opacity: 0.05; cursor: default; }
   @media (hover: hover) and (min-width: 720px) {
@@ -326,6 +328,15 @@
   /* Long-press "selected" cue: the calculator shrinks a touch, which also opens
      up room for the x between the calculator and the dots. */
   body.del-armed .calcwrap { transform: scale(0.93); transition: transform 0.2s ease; }
+
+  /* Swipe-down on an empty calculator: everything above the keypad dips down a
+     little and springs back (origin at the bottom keeps the keypad in place). */
+  @keyframes calcSpring {
+    0% { transform: scaleY(1); }
+    38% { transform: scaleY(0.955); }
+    100% { transform: scaleY(1); }
+  }
+  .content.spring { animation: calcSpring 0.46s cubic-bezier(0.36, 0.07, 0.19, 0.97); transform-origin: center bottom; }
 
   .stage {
     position: relative; /* so it can sit above the sketchpad canvas on the pad */
@@ -485,11 +496,12 @@
   .history {
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
+    justify-content: flex-start; /* top-anchored: new lines grow DOWN, old ones
+                                    never move up; spare space sits below */
     align-items: flex-end;
     gap: 0.5em;
     line-height: 1.15;
-    height: 5.2em;            /* three lines fully visible, a 4th fading at top */
+    height: 5.2em;            /* three lines fully visible, a 4th fading at bottom */
     overflow: hidden;
     font-size: var(--size-ui);
     font-weight: 400;
@@ -507,9 +519,9 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    /* white at the top fading down toward the main line — older lines fade out,
-       hinting there's more to reveal by tapping */
-    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 4%, transparent 75%);
+    /* fade the BOTTOM (newest overflow) so it hints there's more to reveal by
+       expanding, while the top lines stay put */
+    background: linear-gradient(to top, var(--bg) 0%, var(--bg) 4%, transparent 75%);
   }
   .history:not(:empty) { cursor: pointer; }
   /* Tapping the tape drops the fade and reveals every line in full. */
@@ -670,7 +682,7 @@
     opacity: 0;
     transition: opacity 0.3s;
   }
-  body.playing .beat.show { opacity: 1; }
+  body.playing .beat.show, body.beat-on .beat.show { opacity: 1; }
 
   .toast {
     position: fixed;
@@ -1585,13 +1597,15 @@ function positionPageDel() {
   submitEl.style.top = Math.round(mid) + "px"; // submit shares the x's midpoint
   positionPadUndo();
 }
-// Sketchpad undo button: its gap to the dots equals the dots' gap to the bottom.
+// Sketchpad undo button: the GLYPH's gap to the dots equals the dots' gap to the
+// bottom (so account for the button's own bottom padding).
 function positionPadUndo() {
   const undo = document.getElementById("pad-undo");
   const r = dotsEl.getBoundingClientRect();
   if (!r.height) return;
-  const gap = window.innerHeight - r.bottom;           // dots -> bottom
-  undo.style.bottom = Math.round(window.innerHeight - r.top + gap) + "px";
+  const gap = window.innerHeight - r.bottom;            // dots -> bottom
+  const padB = parseFloat(getComputedStyle(undo).paddingBottom) || 0;
+  undo.style.bottom = Math.round(window.innerHeight - r.top + gap - padB) + "px";
 }
 
 // Switch pages WITHOUT animation (the state change). Returns true if it moved.
@@ -1750,8 +1764,17 @@ sketchEl.addEventListener("pointercancel", endPadStroke);
    the new one slides in from the other side. Reversed/natural: drag RIGHT goes
    to the page on the LEFT, drag LEFT goes to the page on the right. */
 const calcwrapEl = document.querySelector(".calcwrap");
-let swipeX = 0, swipeY = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false;
+const contentColEl = document.querySelector(".content");
+let swipeX = 0, swipeY = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null;
 let longPressTimer = null;
+
+// Empty-calc swipe-down: dip everything above the keypad down and spring back.
+function springCalc() {
+  contentColEl.classList.remove("spring");
+  void contentColEl.offsetWidth;
+  contentColEl.classList.add("spring");
+  setTimeout(() => contentColEl.classList.remove("spring"), 480);
+}
 function setDrag(px) { calcwrapEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
 function commitDist() { return Math.min(130, window.innerWidth * 0.26); }
 
@@ -1812,7 +1835,7 @@ stageEl.addEventListener("pointerdown", (e) => {
   swipeX = e.clientX; swipeY = e.clientY;       // recorded for both arm-cancel + swipe
   maybeArmDelete(e);
   if (e.pointerType === "mouse") return; // mouse arms only; navigation via arrows
-  swiping = true; swipeHoriz = false; swipeDone = false;
+  swiping = true; swipeHoriz = false; swipeDone = false; swipeAxis = null;
   calcwrapEl.classList.remove("snapback");
   calcwrapEl.classList.add("dragging");
 });
@@ -1821,8 +1844,13 @@ stageEl.addEventListener("pointermove", (e) => {
   if (longPressTimer && (Math.abs(e.clientX - swipeX) > 10 || Math.abs(e.clientY - swipeY) > 10)) cancelLongPress();
   if (!swiping || swipeDone) return;
   const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
-  if (!swipeHoriz && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) { swipeHoriz = true; cancelLongPress(); }
-  if (swipeHoriz) {
+  // Lock the axis on the first clear move: horizontal = page nav, vertical = menu/tape.
+  if (!swipeAxis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+    swipeAxis = Math.abs(dx) >= Math.abs(dy) ? "h" : "v";
+    cancelLongPress();
+  }
+  if (swipeAxis === "h") {
+    swipeHoriz = true;
     setDrag(Math.max(-window.innerWidth, Math.min(window.innerWidth, dx))); // 1:1 follow
     if (Math.abs(dx) >= commitDist()) commitSwipe(dx > 0 ? 1 : -1);
   }
@@ -1831,7 +1859,17 @@ function endSwipe(e) {
   cancelLongPress();
   if (!swiping) return;
   swiping = false;
-  if (!swipeDone) snapBack(); // released before the commit distance
+  if (swipeDone) return; // a horizontal page-swipe already committed
+  const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
+  if (swipeAxis === "v" && Math.abs(dy) > 50 && Math.abs(dy) > Math.abs(dx) * 1.3) {
+    calcwrapEl.classList.remove("dragging");
+    if (dy < 0) { openMenu(); }                    // swipe up -> menu
+    else if (historyWrapEl.classList.contains("expanded")) { collapseTape(); } // down -> toggle
+    else if (history.length > 0) { expandTape(); } // down -> reveal calculations
+    else { springCalc(); }                         // down on an empty calc -> bounce
+    return;
+  }
+  snapBack(); // horizontal that didn't commit -> ease back
 }
 stageEl.addEventListener("pointerup", endSwipe);
 stageEl.addEventListener("pointercancel", endSwipe);
@@ -1979,7 +2017,7 @@ function backToHome() {
   replaying = false;
   introT0 = null;
   introDraws = [];
-  document.body.classList.remove("playing", "won", "time-up", "entering", "raised", "on-pad", "replay");
+  document.body.classList.remove("playing", "won", "time-up", "entering", "raised", "on-pad", "replay", "beat-on");
   resetArrows();
   resetCalc();
   stopTimer();
@@ -2744,6 +2782,8 @@ function playIntro(t, nums, draws) {
       slotValues[d.i] = pbNums[d.i];
     } });
   });
+  // reveal the "Beat X" banner as soon as the last number lands
+  ev.push({ t: maxEnd, fn: () => { document.body.classList.add("beat-on"); } });
   // entrance (same beats as beginEntrance, but on the pausable clock)
   const HOLD = 2000, RISE = 800, FADE = 500, beat = maxEnd + 450;
   ev.push({ t: beat, fn: () => {
