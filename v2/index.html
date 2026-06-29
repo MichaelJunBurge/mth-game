@@ -526,18 +526,9 @@
   .key.clear { color: var(--red); }
   .key.equals { color: var(--green); }
 
-  /* Expanding the calculations compacts the keypad — button spacing halved both
-     vertically and horizontally — and pulls the 00 line + tape inward so they
-     stay aligned with the keypad's now-inner right column (17/24). */
-  body.tape-open .keys {
-    width: 62.5%;
-    margin-left: 18.75%;
-    row-gap: calc(var(--app-w) * 0.0675);
-  }
-  body.tape-open .display,
-  body.tape-open .history {
-    padding-right: calc(100% * 7 / 24 - 0.3em);
-  }
+  /* Expanding the calculations hides the keypad entirely so the tape can use the
+     full height; the 00 line keeps its normal alignment. */
+  body.tape-open .keys { display: none; }
 
   /* Result screen — same minimal system as the rest of the app. The result
      value uses the target (hero) size; labels and working use the UI size. */
@@ -1348,6 +1339,10 @@ function evaluate() {
   if (expr === "") return;
   if (!/^[0-9+\-x÷^√().\s]*$/.test(expr)) return showError();
 
+  // Forgot to close a bracket before =? Auto-close any that are still open.
+  const unclosed = (expr.match(/\(/g) || []).length - (expr.match(/\)/g) || []).length;
+  if (unclosed > 0) { expr += ")".repeat(unclosed); renderDisplay(); }
+
   const js = expr
     .replace(/√/g, "Math.sqrt")
     .replace(/x/g, "*")
@@ -1412,7 +1407,7 @@ function blankCalc() {
   const av = slotValues.map((v, i) => ({ value: v, slotIndex: i, isTarget: false, tentative: false }));
   if (currentTarget !== null) av.push({ value: currentTarget, slotIndex: null, isTarget: true, tentative: false });
   return { expr: "", lineSum: null, hasLineEntry: false, available: av,
-           slotUsed: new Array(SLOT_COUNT).fill(false), history: [], undoStack: [], lastResult: null };
+           slotUsed: new Array(SLOT_COUNT).fill(false), history: [], undoStack: [], lastResult: null, tapeOpen: false };
 }
 // Freeze the live calculator into a plain object (undo history dropped for save).
 function snapshotCalc(keepUndo) {
@@ -1421,6 +1416,7 @@ function snapshotCalc(keepUndo) {
     available: available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget, tentative: e.tentative })),
     slotUsed: slotUsed.slice(), history: history.slice(),
     undoStack: keepUndo ? undoStack.slice() : [], lastResult: lastResult,
+    tapeOpen: historyWrapEl.classList.contains("expanded"),
   };
 }
 // Make a snapshot the live calculator and render it.
@@ -1444,6 +1440,7 @@ function loadCalc(snap) {
   refreshSlots();
   renderGenerated();
   renderDisplay();
+  if (snap.tapeOpen) expandTape(); // each page keeps its expanded/collapsed state
 }
 
 function pageCount() { return 1 /* sketchpad */ + calcPages.length; }
@@ -2095,7 +2092,7 @@ function restoreState(s) {
     expr: c.expr || "", lineSum: c.lineSum == null ? null : c.lineSum, hasLineEntry: !!c.hasLineEntry,
     available: (c.available || []).map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget, tentative: !!e.tentative })),
     slotUsed: (c.slotUsed || []).slice(), history: (c.history || []).slice(),
-    undoStack: [], lastResult: c.lastResult == null ? null : c.lastResult,
+    undoStack: [], lastResult: c.lastResult == null ? null : c.lastResult, tapeOpen: !!c.tapeOpen,
   }));
   padStrokes = Array.isArray(s.padStrokes) ? s.padStrokes : [];
   pageIndex = s.pageIndex == null ? 1 : s.pageIndex;
@@ -2444,12 +2441,10 @@ function collapseTape() {
   stageEl.style.alignItems = "";
   document.querySelector(".content").style.marginTop = "";
 }
-// Tapping the tape reveals every line; the column is pinned where it is so the
-// target + numbers stay put and the calculator grows DOWNWARD instead of pushing
-// them up. Tap again to collapse.
-historyWrapEl.addEventListener("click", () => {
+// Reveal every line: pin the column where it is so the target + numbers stay put
+// and the calculator (keypad hidden) grows DOWNWARD instead of pushing them up.
+function expandTape() {
   if (history.length === 0) return;
-  if (historyWrapEl.classList.contains("expanded")) { collapseTape(); return; }
   const content = document.querySelector(".content");
   const stageTop = stageEl.getBoundingClientRect().top;
   const padTop = parseFloat(getComputedStyle(stageEl).paddingTop) || 0;
@@ -2457,7 +2452,11 @@ historyWrapEl.addEventListener("click", () => {
   stageEl.style.alignItems = "flex-start";    // anchor the top so it grows down
   content.style.marginTop = Math.max(0, offset) + "px";
   historyWrapEl.classList.add("expanded");
-  document.body.classList.add("tape-open");   // compact keypad to free room
+  document.body.classList.add("tape-open");   // hides the keypad
+}
+historyWrapEl.addEventListener("click", () => {
+  if (historyWrapEl.classList.contains("expanded")) collapseTape();
+  else expandTape();
 });
 
 buildSlots();
