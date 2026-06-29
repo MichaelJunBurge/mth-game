@@ -329,16 +329,6 @@
      up room for the x between the calculator and the dots. */
   body.del-armed .calcwrap { transform: scale(0.93); transition: transform 0.2s ease; }
 
-  /* Swipe-down on an empty calculator: the calculation history, 00 line and keys
-     dip down a little and spring back (origin at the bottom keeps the keys put).
-     Only the .calc moves — target / numbers / chips are untouched. */
-  @keyframes calcSpring {
-    0% { transform: scaleY(1); }
-    38% { transform: scaleY(0.955); }
-    100% { transform: scaleY(1); }
-  }
-  .calc.spring { animation: calcSpring 0.46s cubic-bezier(0.36, 0.07, 0.19, 0.97); transform-origin: center bottom; }
-
   .stage {
     position: relative; /* so it can sit above the sketchpad canvas on the pad */
     min-height: 100vh;
@@ -736,8 +726,7 @@
     align-items: center;
     gap: 4vh;
   }
-  .menu:not(.help-open) .menu-main { display: flex; }
-  .menu.help-open .menu-help { display: flex; }
+  .menu .menu-main { display: flex; }
   .menu-btn {
     background: none;
     border: none;
@@ -767,8 +756,9 @@
     gap: 4vh;
   }
   body.guide-open #guide { display: flex; }
-  #guide:not(.rules-open) .guide-choice { display: flex; }
+  #guide:not(.rules-open):not(.overview-open) .guide-choice { display: flex; }
   #guide.rules-open .guide-rules-view { display: flex; }
+  #guide.overview-open .guide-overview-view { display: flex; }
 
   /* Walkthrough coach-mark: a spotlight + arrow + note pointing at the live UI. */
   /* pointer-events:auto so the dimmed area blocks the live UI during the tour. */
@@ -795,15 +785,17 @@
     left: 50%;
     transform: translateX(-50%);
     bottom: calc(7dvh + env(safe-area-inset-bottom, 0px));
-    width: min(86vw, 420px);
+    width: 72vw;
+    max-width: 320px;       /* just big enough for the text, not the whole screen */
     background: var(--bg);
     border: 2px solid var(--ink);
     border-radius: 12px;
-    padding: 1em 1.1em;
+    padding: 0.85em 1em;
     pointer-events: auto;
     z-index: 86;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.14);
   }
+  .tour-note p { font-size: calc(var(--size-ui) * 0.92); }
   .tour-note p { margin: 0 0 0.85em; font-size: var(--size-ui); line-height: 1.5; color: var(--ink); }
   .tour-actions { display: flex; justify-content: space-between; gap: 1em; }
   .tour-btn {
@@ -813,8 +805,11 @@
   }
   #tour-exit { color: var(--red); }
   #tour-next { color: var(--green); }
-  .menu-help { max-width: 80vw; gap: 3vh; }
+  .guide-rules-view, .guide-overview-view { gap: 3vh; }
   .help-text {
+    width: 60vw;          /* ~60% of the viewport on mobile and desktop */
+    max-height: 74vh;
+    overflow-y: auto;
     font-size: var(--size-ui);
     font-weight: 400;
     line-height: 1.6;
@@ -930,15 +925,10 @@
       <button id="menu-resume" class="menu-btn" data-i18n="menu.resume">Resume</button>
       <button id="menu-reset" class="menu-btn" data-i18n="menu.reset">Reset</button>
       <button id="menu-home" class="menu-btn" data-i18n="menu.home">Home</button>
-      <button id="menu-help" class="menu-btn" data-i18n="menu.help">Help</button>
       <button id="menu-auto" class="menu-btn">Auto (=) on</button>
       <button id="menu-sign" class="menu-btn">Auto (×)</button>
       <button id="menu-theme" class="menu-btn">Dark mode</button>
       <button id="menu-lang" class="menu-btn">한국어</button>
-    </div>
-    <div class="menu-view menu-help">
-      <div class="help-text" id="menu-rules-text"></div>
-      <button id="menu-help-back" class="menu-btn" data-i18n="menu.back">Back</button>
     </div>
   </div>
 
@@ -948,10 +938,15 @@
     <div class="menu-view guide-choice">
       <button id="guide-walk" class="menu-btn" data-i18n="guide.walk">Walkthrough</button>
       <button id="guide-rules" class="menu-btn" data-i18n="guide.rules">Rules</button>
+      <button id="guide-overview" class="menu-btn" data-i18n="guide.overview">Overview</button>
     </div>
     <div class="menu-view guide-rules-view">
       <div class="help-text" id="guide-rules-text"></div>
-      <button id="guide-back" class="menu-btn" data-i18n="menu.back">Back</button>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <div class="menu-view guide-overview-view">
+      <div class="help-text" id="guide-overview-text"></div>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
   </div>
 
@@ -1848,13 +1843,6 @@ const calcwrapEl = document.querySelector(".calcwrap");
 let swipeX = 0, swipeY = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null;
 let longPressTimer = null;
 
-// Empty-calc swipe-down: dip just the calc (history + 00 line + keys) and back.
-function springCalc() {
-  calcEl.classList.remove("spring");
-  void calcEl.offsetWidth;
-  calcEl.classList.add("spring");
-  setTimeout(() => calcEl.classList.remove("spring"), 480);
-}
 function setDrag(px) { calcwrapEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
 function commitDist() { return Math.min(130, window.innerWidth * 0.26); }
 
@@ -1909,27 +1897,34 @@ function snapBack() {
   setDrag(0);
 }
 
+function tourOrOverlayOpen() {
+  return document.body.classList.contains("menu-open") ||
+         document.body.classList.contains("guide-open") ||
+         document.body.classList.contains("tour-on") ||
+         document.body.classList.contains("won");
+}
 stageEl.addEventListener("pointerdown", (e) => {
-  if (animating || !document.body.classList.contains("playing")) return;
-  document.body.classList.remove("del-armed"); // a new press deselects the calc
-  swipeX = e.clientX; swipeY = e.clientY;       // recorded for both arm-cancel + swipe
-  maybeArmDelete(e);
-  if (e.pointerType === "mouse") return; // mouse arms only; navigation via arrows
+  if (animating || tourOrOverlayOpen()) return;
+  const playing = document.body.classList.contains("playing");
+  if (playing) {
+    document.body.classList.remove("del-armed"); // a new press deselects the calc
+    maybeArmDelete(e);
+  }
+  swipeX = e.clientX; swipeY = e.clientY;
+  if (e.pointerType === "mouse") return; // mouse: arms only; arrows for nav
   swiping = true; swipeHoriz = false; swipeDone = false; swipeAxis = null;
-  calcwrapEl.classList.remove("snapback");
-  calcwrapEl.classList.add("dragging");
+  if (playing) { calcwrapEl.classList.remove("snapback"); calcwrapEl.classList.add("dragging"); }
 });
 stageEl.addEventListener("pointermove", (e) => {
-  // moving the pointer cancels a pending press-and-hold (it's a drag, not a hold)
   if (longPressTimer && (Math.abs(e.clientX - swipeX) > 10 || Math.abs(e.clientY - swipeY) > 10)) cancelLongPress();
   if (!swiping || swipeDone) return;
   const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
-  // Lock the axis on the first clear move: horizontal = page nav, vertical = menu/tape.
+  // Lock the axis on the first clear move: horizontal = page nav, vertical = menu/help.
   if (!swipeAxis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
     swipeAxis = Math.abs(dx) >= Math.abs(dy) ? "h" : "v";
     cancelLongPress();
   }
-  if (swipeAxis === "h") {
+  if (swipeAxis === "h" && document.body.classList.contains("playing")) {
     swipeHoriz = true;
     setDrag(Math.max(-window.innerWidth, Math.min(window.innerWidth, dx))); // 1:1 follow
     if (Math.abs(dx) >= commitDist()) commitSwipe(dx > 0 ? 1 : -1);
@@ -1943,16 +1938,8 @@ function endSwipe(e) {
   const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
   if (swipeAxis === "v" && Math.abs(dy) > 50 && Math.abs(dy) > Math.abs(dx) * 1.3) {
     calcwrapEl.classList.remove("dragging");
-    // Vertical stack: equations(down) - normal - menu(up). Each swipe moves one
-    // step; the menu's own swipe-down (below) handles closing it.
-    if (dy < 0) {                                            // swipe up
-      if (historyWrapEl.classList.contains("expanded")) collapseTape(); // close equations
-      else openMenu();                                      // ...then open the menu
-    } else {                                                // swipe down
-      if (historyWrapEl.classList.contains("expanded")) { /* already down */ }
-      else if (history.length > 0) expandTape();            // open equations
-      else springCalc();                                    // empty -> bounce
-    }
+    if (dy < 0) openGuide();   // swipe up   -> help (any page)
+    else openMenu();           // swipe down -> menu (any page)
     return;
   }
   snapBack(); // horizontal that didn't commit -> ease back
@@ -2553,26 +2540,31 @@ const I18N = {
     "toast.copied": "Challenge link copied", "toast.help": "Open the menu (≡) any time during play",
     "share.time": "Beat my time of {t}!", "share.score": "Beat my score of {s}!",
     "tour.next": "Next", "tour.done": "Done", "tour.exit": "Exit",
-    "rules.intro": "Reach the target, or work down to 0, using each of your six numbers once.",
+    "guide.overview": "Overview",
+    "overview": [
+      "Reach the target number, or work all the way down to 0, using each of your six numbers exactly once.",
+      "You don't have to be exact — you're scored by how close you get. If nobody solves it, the closest answer wins, and a faster time breaks ties.",
+    ],
     "rules": [
       "Tap the 000 target to roll a number from 100–999.",
       "On each slot, tap ▲ for a big number (20–100) or ▼ for a small one (1–10). Draw all six.",
-      "Tap a number, then a symbol (+ − × ÷ ^ √), then another number. The target can be used once too.",
-      "Every result you make becomes a chip you can reuse.",
-      "Auto (=) solves each step as you go — turn it off to build a full sum and press =.",
-      "Auto sign sets which symbol auto-fills between two numbers in a row.",
-      "c: tap to undo, hold to keep deleting. = banks the line so you can start fresh.",
-      "Swipe left/right (or the side arrows) to move between calculators — swipe past the last to add one. The sketchpad is on the far left.",
-      "Swipe up for the menu; swipe down to open the calculations. Press and hold the calculator to delete the page.",
-      "Submit (green, or in the menu) ends the round — it lights up once all six numbers are used.",
+      "Tap a number, then a symbol (+ − × ÷ ^ √), then another number. The target itself can be used once.",
+      "Every result you make becomes a chip you can tap to reuse.",
+      "Auto (=) solves each step as you go — turn it off to build a whole expression, then press =.",
+      "Auto sign sets which symbol drops in automatically when you tap two numbers in a row.",
+      "c: tap to undo a step, hold to keep deleting. = banks the current line so you can start fresh.",
+      "Swipe left/right (or use the side arrows) to move between calculators — swipe past the last to add a new one. The sketchpad is on the far left.",
+      "Press and hold anywhere on a calculator to delete that page.",
+      "Swipe up for help and swipe down for the menu — on any page. Submit (green, or in the menu) ends the round once all six numbers are used.",
     ],
     "walk": [
       "This is your target. Tap it to roll a number from 100 to 999.",
       "On each number, tap ▲ for a big number or ▼ for a small one. Draw all six to begin.",
       "These are your six numbers. Tap one, a symbol, then another to make a calculation.",
-      "Your sums show here. Swipe down to open the full list; tap c to undo, = to bank the line.",
-      "The dots show your pages. Swipe left/right to switch calculators — or reach the sketchpad on the far left.",
-      "Tap the timer (or swipe up) for the menu. Submit ends the round once all six numbers are used. That's it — have fun!",
+      "Your calculations show here. Tap to open the full list. c undoes, = banks the line.",
+      "These dots are your pages. Swipe left/right to switch calculators — or reach the sketchpad on the far left.",
+      "Swipe up for help, swipe down for the menu — on any page. Submit ends the round once all six numbers are used.",
+      "Closest to the target wins. If nobody solves it, whoever gets closest takes it — and a faster time breaks a tie. Have fun!",
     ],
   },
   ko: {
@@ -2593,26 +2585,31 @@ const I18N = {
     "toast.copied": "도전 링크가 복사되었습니다", "toast.help": "게임 중 언제든 메뉴(≡)를 열 수 있어요",
     "share.time": "내 기록 {t} 깨보세요!", "share.score": "내 점수 {s} 깨보세요!",
     "tour.next": "다음", "tour.done": "완료", "tour.exit": "나가기",
-    "rules.intro": "여섯 개의 숫자를 한 번씩만 사용해 목표 숫자에 도달하거나 0까지 줄이세요.",
+    "guide.overview": "개요",
+    "overview": [
+      "여섯 개의 숫자를 각각 한 번씩만 사용해 목표 숫자에 도달하거나 0까지 줄이세요.",
+      "꼭 정확할 필요는 없어요 — 얼마나 가까운지로 점수가 매겨집니다. 아무도 못 맞히면 가장 가까운 답이 이기고, 동점이면 더 빠른 기록이 이깁니다.",
+    ],
     "rules": [
       "000 목표를 눌러 100~999 사이의 숫자를 뽑으세요.",
       "각 칸에서 ▲를 누르면 큰 수(20~100), ▼를 누르면 작은 수(1~10)가 나옵니다. 여섯 개를 모두 뽑으세요.",
       "숫자를 누르고 기호(+ − × ÷ ^ √)를 누른 뒤 다른 숫자를 누르세요. 목표 숫자도 한 번 사용할 수 있어요.",
-      "만든 결과는 다시 쓸 수 있는 칩이 됩니다.",
+      "만든 결과는 눌러서 다시 쓸 수 있는 칩이 됩니다.",
       "자동 (=)은 매 단계를 자동으로 계산합니다 — 끄면 식을 다 만든 뒤 =를 누르세요.",
       "자동 기호는 두 숫자를 연달아 누를 때 자동으로 들어갈 기호를 정합니다.",
-      "c: 한 번 누르면 되돌리기, 길게 누르면 계속 지웁니다. =는 현재 줄을 정리합니다.",
+      "c: 한 번 누르면 한 단계 되돌리기, 길게 누르면 계속 지웁니다. =는 현재 줄을 정리합니다.",
       "좌우로 스와이프(또는 화살표)하면 계산기를 넘기고, 마지막에서 더 넘기면 새 계산기가 생깁니다. 맨 왼쪽은 스케치패드입니다.",
-      "위로 스와이프하면 메뉴, 아래로 스와이프하면 계산 기록이 열립니다. 계산기를 길게 누르면 페이지가 삭제됩니다.",
-      "제출(초록색 또는 메뉴)으로 라운드를 끝냅니다 — 숫자 여섯 개를 모두 쓰면 켜집니다.",
+      "계산기를 길게 누르면 그 페이지를 삭제할 수 있어요.",
+      "어느 페이지에서든 위로 스와이프하면 도움말, 아래로 스와이프하면 메뉴가 열립니다. 숫자를 모두 쓰면 제출(초록색 또는 메뉴)로 라운드를 끝냅니다.",
     ],
     "walk": [
       "이것은 목표 숫자입니다. 눌러서 100~999 사이의 숫자를 뽑으세요.",
       "각 숫자에서 ▲는 큰 수, ▼는 작은 수입니다. 여섯 개를 모두 뽑아 시작하세요.",
       "여섯 개의 숫자입니다. 숫자, 기호, 다른 숫자를 차례로 눌러 계산하세요.",
-      "계산 결과가 여기에 표시됩니다. 아래로 스와이프하면 전체 목록이 열려요. c는 되돌리기, =는 줄 정리입니다.",
-      "아래 점들은 페이지를 나타냅니다. 좌우로 스와이프해 계산기를 넘기거나 맨 왼쪽 스케치패드로 가세요.",
-      "타이머를 누르거나 위로 스와이프하면 메뉴가 열립니다. 숫자를 모두 쓰면 제출로 끝낼 수 있어요. 즐겁게 플레이하세요!",
+      "계산 결과가 여기에 표시됩니다. 눌러서 전체 목록을 여세요. c는 되돌리기, =는 줄 정리입니다.",
+      "이 점들은 페이지입니다. 좌우로 스와이프해 계산기를 넘기거나 맨 왼쪽 스케치패드로 가세요.",
+      "어느 페이지에서든 위로 스와이프하면 도움말, 아래로 스와이프하면 메뉴가 열립니다. 숫자를 모두 쓰면 제출로 끝낼 수 있어요.",
+      "목표에 가장 가까우면 승리! 아무도 못 맞히면 가장 가까운 사람이 이기고, 동점이면 더 빠른 기록이 이깁니다. 즐겁게 플레이하세요!",
     ],
   },
 };
@@ -2633,7 +2630,7 @@ function applyLang() {
   document.getElementById("menu-lang").textContent = t("menu.lang");
   const sub = document.getElementById("menu-submit");
   if (sub.style.display !== "none") sub.textContent = allUsedUp() ? t("submit") : t("quit");
-  renderRules();
+  renderHelp();
   if (sharedGame) refreshBeat();
   if (document.body.classList.contains("tour-on")) renderTourStep();
 }
@@ -2647,19 +2644,19 @@ function refreshBeat() {
   const o = sharedGame.outcome;
   beatEl.textContent = t("beat", { x: o.solved ? fmtTime(o.timeSec) : o.score });
 }
-function renderRules() {
-  [document.getElementById("menu-rules-text"), document.getElementById("guide-rules-text")].forEach((box) => {
-    if (!box) return;
-    box.innerHTML = "";
-    const intro = document.createElement("p");
-    intro.innerHTML = "<b>" + t("rules.intro") + "</b>";
-    box.appendChild(intro);
-    (t("rules") || []).forEach((line) => {
-      const p = document.createElement("p");
-      p.textContent = line;
-      box.appendChild(p);
-    });
+function fillHelp(boxId, key) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  box.innerHTML = "";
+  (t(key) || []).forEach((line) => {
+    const p = document.createElement("p");
+    p.textContent = line;
+    box.appendChild(p);
   });
+}
+function renderHelp() {
+  fillHelp("guide-rules-text", "rules");
+  fillHelp("guide-overview-text", "overview");
 }
 
 function applyTheme(theme) {
@@ -2693,16 +2690,31 @@ function cycleAutoSign() {
 }
 
 let menuPausedElapsed = null;
-function openMenu() {
-  // During a game the timer freezes; from the home screen the menu just opens.
-  const playing = document.body.classList.contains("playing");
-  if (playing) {
+// An overlay (menu or help) freezes the game / intro playback while it's open.
+function pauseForOverlay() {
+  if (menuPausedElapsed !== null) return; // already paused
+  if (document.body.classList.contains("playing")) {
     menuPausedElapsed = elapsedSeconds();
     stopTimer();
     borderPath.style.animationPlayState = "paused";
   } else if (replaying) {
-    pbPause(); // freeze the shared-intro playback while the menu is open
+    pbPause();
   }
+}
+function resumeFromOverlay() {
+  if (menuPausedElapsed !== null && document.body.classList.contains("playing")) {
+    startEpoch = Date.now() - menuPausedElapsed * 1000;
+    runTimerLoop();
+    borderPath.style.animationPlayState = "running";
+  } else if (replaying) {
+    pbResume();
+  }
+  menuPausedElapsed = null;
+}
+function openMenu() {
+  const playing = document.body.classList.contains("playing");
+  closeGuide();         // never both at once
+  pauseForOverlay();
   // Quit/Submit: end the game with the page you opened the menu on. It's "Quit"
   // until every number is used, then becomes a green "Submit". Calc pages only.
   const sub = document.getElementById("menu-submit");
@@ -2719,7 +2731,6 @@ function openMenu() {
   document.getElementById("menu-resume").style.display = shared ? "" : "none";
   document.getElementById("menu-reset").style.display = shared ? "" : "none";
   document.getElementById("menu-home").style.display = shared ? "none" : "";
-  menuEl.classList.remove("help-open");
   document.body.classList.add("menu-open");
 }
 
@@ -2734,15 +2745,11 @@ function submitFromMenu() {
   finishSubmitted();
 }
 function closeMenu(resume) {
+  const wasOpen = document.body.classList.contains("menu-open");
   document.body.classList.remove("menu-open");
-  if (resume && menuPausedElapsed !== null && document.body.classList.contains("playing")) {
-    startEpoch = Date.now() - menuPausedElapsed * 1000; // resume from the frozen time
-    runTimerLoop();
-    borderPath.style.animationPlayState = "running";
-  } else if (resume && replaying) {
-    pbResume(); // resume the shared-intro playback
-  }
-  menuPausedElapsed = null;
+  if (!wasOpen) return;            // nothing to resume
+  if (resume) resumeFromOverlay();
+  else menuPausedElapsed = null;
 }
 
 // Restart a shared puzzle from its intro (so the link isn't lost on Reset/Home).
@@ -2775,26 +2782,25 @@ document.getElementById("nav-help").addEventListener("click", openGuide);
 document.getElementById("menu-close").addEventListener("click", () => closeMenu(true));
 document.getElementById("menu-lang").addEventListener("click", toggleLang);
 
-// Swipe down on the menu to close it (mirrors swipe-up to open it).
-let menuSwipeY = 0, menuSwipeX = 0, menuSwiping = false;
-menuEl.addEventListener("pointerdown", (e) => {
-  if (e.pointerType === "mouse") return;
-  menuSwiping = true; menuSwipeY = e.clientY; menuSwipeX = e.clientX;
-});
-menuEl.addEventListener("pointerup", (e) => {
-  if (!menuSwiping || e.pointerType === "mouse") return;
-  menuSwiping = false;
-  const dy = e.clientY - menuSwipeY, dx = e.clientX - menuSwipeX;
-  if (dy > 50 && dy > Math.abs(dx) * 1.3) closeMenu(true); // swipe down -> close
-});
-menuEl.addEventListener("pointercancel", () => { menuSwiping = false; });
+// Vertical-swipe-to-close on the overlays. The menu opens with a swipe DOWN, so
+// it closes with a swipe UP; the help opens with a swipe UP, so it closes DOWN.
+function overlaySwipeClose(el, dir, onClose) {
+  let sy = 0, sx = 0, on = false;
+  el.addEventListener("pointerdown", (e) => { if (e.pointerType === "mouse") return; on = true; sy = e.clientY; sx = e.clientX; });
+  el.addEventListener("pointerup", (e) => {
+    if (!on || e.pointerType === "mouse") return; on = false;
+    const dy = e.clientY - sy, dx = e.clientX - sx;
+    if (dir * dy > 50 && Math.abs(dy) > Math.abs(dx) * 1.3) onClose();
+  });
+  el.addEventListener("pointercancel", () => { on = false; });
+}
+overlaySwipeClose(menuEl, -1, () => closeMenu(true));                       // swipe up closes the menu
+overlaySwipeClose(document.getElementById("guide"), 1, () => closeGuide()); // swipe down closes help
 document.getElementById("menu-submit").addEventListener("click", submitFromMenu);
 document.getElementById("menu-resume").addEventListener("click", () => closeMenu(true));
 document.getElementById("menu-reset").addEventListener("click", () => { closeMenu(false); restartShared(); });
 document.getElementById("menu-home").addEventListener("click", () => { closeMenu(false); goHome(); });
 submitEl.addEventListener("click", finishSubmitted);
-document.getElementById("menu-help").addEventListener("click", () => menuEl.classList.add("help-open"));
-document.getElementById("menu-help-back").addEventListener("click", () => menuEl.classList.remove("help-open"));
 document.getElementById("menu-theme").addEventListener("click", toggleTheme);
 document.getElementById("menu-auto").addEventListener("click", toggleAutoEqual);
 document.getElementById("menu-sign").addEventListener("click", cycleAutoSign);
@@ -2802,23 +2808,31 @@ document.getElementById("menu-sign").addEventListener("click", cycleAutoSign);
 /* ---------------- Help: question-mark popup + walkthrough ---------------- */
 const guideEl = document.getElementById("guide");
 function openGuide() {
-  guideEl.classList.remove("rules-open");
+  guideEl.classList.remove("rules-open", "overview-open"); // start at the choices
+  closeMenu(false);                                        // never both at once
   document.body.classList.add("guide-open");
+  pauseForOverlay();
 }
-function closeGuide() { document.body.classList.remove("guide-open"); }
+function closeGuide() {
+  document.body.classList.remove("guide-open");
+  guideEl.classList.remove("rules-open", "overview-open");
+  resumeFromOverlay();
+}
 document.getElementById("guide-close").addEventListener("click", closeGuide);
 document.getElementById("guide-rules").addEventListener("click", () => guideEl.classList.add("rules-open"));
-document.getElementById("guide-back").addEventListener("click", () => guideEl.classList.remove("rules-open"));
+document.getElementById("guide-overview").addEventListener("click", () => guideEl.classList.add("overview-open"));
+document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => guideEl.classList.remove("rules-open", "overview-open")));
 document.getElementById("guide-walk").addEventListener("click", () => { closeGuide(); startTour(); });
 
 // The walkthrough drives a quick demo and points a spotlight + note at each part.
 const TOUR_STEPS = [
-  { setup: () => { goHome(); }, el: () => targetEl, hi: "top" },
-  { setup: () => { tourSetTarget(); }, el: () => slotsEl.children[0], hi: "mid" },
-  { setup: () => { tourFillNumbers(); }, el: () => slotsEl, hi: "mid" },
-  { setup: () => {}, el: () => document.querySelector(".calc"), hi: "low" },
-  { setup: () => {}, el: () => dotsEl, hi: "low" },
-  { setup: () => {}, el: () => timerEl, hi: "top" },
+  { setup: () => { goHome(); }, el: () => targetEl },
+  { setup: () => { tourSetTarget(); }, el: () => slotsEl.children[0] },
+  { setup: () => { tourFillNumbers(); }, el: () => slotsEl },
+  { setup: () => { tourDemoCalc(); }, el: () => historyWrapEl },   // where sums show
+  { setup: () => {}, el: () => dotsEl },                           // page dots
+  { setup: () => {}, el: () => timerEl },                          // menu / help / submit
+  { setup: () => {}, el: () => null },                             // scoring (centred note)
 ];
 let tourIndex = 0;
 function tourSetTarget() {
@@ -2837,6 +2851,11 @@ function tourFillNumbers() {
     up.disabled = true; down.disabled = true;
   }
   startPlaying();
+}
+function tourDemoCalc() {
+  if (history.length > 0) return; // sample 100 × 8 = 800 so the tape isn't empty
+  const a = available.find((e) => e.slotIndex === 0), b = available.find((e) => e.slotIndex === 2);
+  if (a && b) { playNumber(a); playNumber(b); if (history.length === 0) evaluate(); }
 }
 function startTour() {
   tourIndex = 0;
@@ -2869,7 +2888,17 @@ function positionTour(el) {
   const arrow = document.getElementById("tour-arrow");
   const note = document.getElementById("tour-note");
   const H = window.innerHeight;
-  if (!el) { ring.style.display = arrow.style.display = "none"; return; }
+  if (!el) { // no element (e.g. the scoring slide) — centre the note over a full dim
+    arrow.style.display = "none";
+    ring.style.display = "block"; // 0x0 ring at centre = whole-screen dim, no visible hole
+    ring.style.left = "50%"; ring.style.top = "50%";
+    ring.style.width = "0px"; ring.style.height = "0px";
+    note.style.bottom = "auto";
+    note.style.top = "50%";
+    note.style.transform = "translate(-50%, -50%)";
+    return;
+  }
+  note.style.transform = "translateX(-50%)";
   ring.style.display = arrow.style.display = "block";
   const r = el.getBoundingClientRect();
   const pad = 8;
@@ -2877,11 +2906,12 @@ function positionTour(el) {
   ring.style.top = (r.top - pad) + "px";
   ring.style.width = (r.width + pad * 2) + "px";
   ring.style.height = (r.height + pad * 2) + "px";
-  // note opposite the element so it never covers it
+  // note opposite the element so it never covers it. Pin only ONE edge ("auto"
+  // on the other — clearing to "" would fall back to the stylesheet's bottom and
+  // stretch the box full-height).
   const low = (r.top + r.height / 2) > H * 0.55;
-  note.style.top = note.style.bottom = "";
-  if (low) note.style.top = "calc(8dvh + env(safe-area-inset-top, 0px))";
-  else note.style.bottom = "calc(7dvh + env(safe-area-inset-bottom, 0px))";
+  if (low) { note.style.top = "calc(8dvh + env(safe-area-inset-top, 0px))"; note.style.bottom = "auto"; }
+  else { note.style.bottom = "calc(7dvh + env(safe-area-inset-bottom, 0px))"; note.style.top = "auto"; }
   // arrow points at the ring: above it (pointing down) unless it's near the top
   const aw = arrow.offsetWidth || 120, ah = arrow.offsetHeight || 120;
   const cx = r.left + r.width / 2;
