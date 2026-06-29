@@ -122,32 +122,7 @@
   body.playing .timer { pointer-events: auto; cursor: pointer; }
   body.playing .timer:hover { color: var(--ink); }
 
-  /* Submit — mirrors the timer at the bottom. Sits muted (like the timer) and
-     brightens to full black on hover (no scale animation). */
-  .submit {
-    position: fixed;
-    bottom: 5vh;
-    bottom: calc(5dvh + env(safe-area-inset-bottom, 0px));
-    left: 0;
-    right: 0;
-    text-align: center;
-    font-family: var(--font);
-    font-size: var(--size-ui);
-    font-weight: 700;
-    letter-spacing: 0.15em;
-    color: var(--ink);
-    background: none;
-    border: none;
-    cursor: pointer;
-    z-index: 40;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s;
-  }
-  body.playing .submit { opacity: 0.2; pointer-events: auto; }
-  body.playing .submit:hover { opacity: 1; }
-  /* All six numbers used: a calm "you could stop here" cue (not correctness). */
-  body.playing .submit.ready { opacity: 1; color: var(--green); }
+  /* Submit lives in the timer/pause menu now (see #menu-submit). */
 
   /* Home-screen icons (hamburger / profile). Shown only on the home screen;
      they fade out once a game is entering / playing / won. */
@@ -198,7 +173,6 @@
   }
   body.on-pad .sketch { display: block; }
   body.on-pad .stage { display: none; }
-  body.on-pad .submit { display: none; }
 
   /* Page dots — one per page (pad + each calculator); the current one is solid. */
   .dots {
@@ -207,15 +181,15 @@
     transform: translateX(-50%);
     bottom: calc(1.8dvh + env(safe-area-inset-bottom, 0px));
     display: none;
-    gap: 0.85em;
+    gap: 0.75em;
     align-items: center;
     z-index: 43;
   }
   body.entering .dots, body.playing .dots { display: flex; }
   body.won .dots { display: none; }
   .dot {
-    width: 0.62em;
-    height: 0.62em;
+    width: 0.42em;
+    height: 0.42em;
     border-radius: 50%;
     background: var(--ink);
     opacity: 0.2;
@@ -223,14 +197,15 @@
     transition: opacity 0.2s ease, transform 0.1s;
   }
   .dot.active { opacity: 1; }
-  .dot.pad { border-radius: 2px; } /* the sketchpad reads as a little square */
+  .dot.pad { border-radius: 1px; } /* the sketchpad reads as a little square */
   .dot:active { transform: scale(0.85); }
 
-  /* Delete the current page (top-right). */
+  /* Delete the current page — below the calculator, above the dots. */
   .page-del {
     position: fixed;
-    top: calc(5dvh + env(safe-area-inset-top, 0px));
-    right: calc(5vw + env(safe-area-inset-right, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(6dvh + env(safe-area-inset-bottom, 0px));
     z-index: 43;
     background: none;
     border: none;
@@ -246,7 +221,8 @@
   body.won .page-del { display: none; }
   .page-del:hover { opacity: 0.7; }
 
-  /* Side arrows (pointer devices / wider screens). Swipe replaces them on touch. */
+  /* Side arrows. Shown on pointer/wide screens, and always on the sketchpad
+     (there, the surface is for drawing so you can't swipe to leave). */
   .pager-arrow {
     position: fixed;
     top: 50%;
@@ -268,12 +244,16 @@
   @media (hover: hover) and (min-width: 720px) {
     body.playing .pager-arrow { display: block; }
   }
+  body.on-pad .pager-arrow { display: block; } /* always navigable off the pad */
 
   /* Page-change slide-in (directional). */
   @keyframes pageInR { from { transform: translateX(28px); opacity: 0.25; } to { transform: none; opacity: 1; } }
   @keyframes pageInL { from { transform: translateX(-28px); opacity: 0.25; } to { transform: none; opacity: 1; } }
   .page-anim-r { animation: pageInR 0.22s ease; }
   .page-anim-l { animation: pageInL 0.22s ease; }
+  /* The calculator column follows the finger a little while swiping. */
+  .content.dragging { transition: none; }
+  .content.snapback { transition: transform 0.18s ease; }
 
   .stage {
     min-height: 100vh;
@@ -680,6 +660,8 @@
     transition: transform 0.08s;
   }
   .menu-btn:hover { transform: scale(1.12); }
+  /* Submit goes green once all six numbers are used (a "you can stop" cue). */
+  .menu-btn.ready { color: var(--green); }
   .menu-help { max-width: 80vw; gap: 3vh; }
   .help-text {
     font-size: var(--size-ui);
@@ -698,8 +680,6 @@
 
   <div id="timer" class="timer">00:00</div>
   <div id="beat" class="beat"></div>
-
-  <button id="submit" class="submit">Submit</button>
 
   <!-- Home-screen nav: hamburger (menu) up top where the timer sits during play,
        profile placeholder at the bottom where Submit sits. Icons, not words. -->
@@ -768,6 +748,7 @@
   <div id="menu" class="menu">
     <button id="menu-close" class="menu-x" aria-label="Close menu">&times;</button>
     <div class="menu-view menu-main">
+      <button id="menu-submit" class="menu-btn">Submit</button>
       <button id="menu-home" class="menu-btn">Home</button>
       <button id="menu-help" class="menu-btn">Help</button>
       <button id="menu-auto" class="menu-btn">Auto (=) on</button>
@@ -782,7 +763,8 @@
         <p>c: tap to undo a step, or hold it down to keep deleting. Press = to bank the line and start fresh.</p>
         <p>Auto (=) (menu) solves each step as you go; turn it off to build a full sum and press =.</p>
         <p>Auto sign (menu) picks which symbol drops in when you tap two numbers in a row.</p>
-        <p>Submit turns green once all six numbers are used — a hint you can stop, not that it's right.</p>
+        <p>Swipe (or use the side arrows) to switch calculators — swipe past the last to add one — and the sketchpad on the far left. Dots show where you are; × below the calculator deletes the page.</p>
+        <p>Submit is in this menu (tap the timer). It scores the page you're on and goes green once all six numbers are used.</p>
       </div>
       <button id="menu-help-back" class="menu-btn">Back</button>
     </div>
@@ -830,7 +812,6 @@ const winTheirEl = document.getElementById("win-their");
 const winHomeBtn = document.getElementById("win-home");
 const winShareBtn = document.getElementById("win-share");
 const toastEl = document.getElementById("toast");
-const submitEl = document.getElementById("submit");
 const beatEl = document.getElementById("beat");
 const sketchEl = document.getElementById("sketch");
 const sketchCtx = sketchEl.getContext("2d");
@@ -1159,15 +1140,10 @@ function refreshSlots() {
     const e = available.find((x) => x.slotIndex === i);
     slotParts(i).num.classList.toggle("used", slotUsed[i] || !!(e && e.tentative));
   }
-  updateSubmitReady();
 }
 
-// Submit turns (and stays) green once all six numbers are used — a hint that
-// you could stop here. It does NOT mean the answer is the target.
-function updateSubmitReady() {
-  const allUsed = SLOT_COUNT > 0 && slotUsed.every(Boolean);
-  submitEl.classList.toggle("ready", allUsed);
-}
+// True once all six numbers have been used in the active calculator.
+function allSixUsed() { return SLOT_COUNT > 0 && slotUsed.every(Boolean); }
 
 // The generated-numbers row shows only FREED results (as reminders). A result
 // that's currently on the line, or a number tentatively placed in the current
@@ -1592,20 +1568,41 @@ function endPadStroke() {
 sketchEl.addEventListener("pointerup", endPadStroke);
 sketchEl.addEventListener("pointercancel", endPadStroke);
 
-/* ---- Page navigation: swipe (calculator views) + arrows ---- */
-let swipeX = 0, swipeY = 0, swipeT = 0, swiping = false;
+/* ---- Page navigation: swipe (calculator views) + arrows ----
+   Natural carousel feel: the column follows the finger a little, and releasing a
+   clear horizontal swipe RIGHT goes to the page on the LEFT (and vice versa). */
+const contentEl = document.querySelector(".content");
+let swipeX = 0, swipeY = 0, swipeT = 0, swiping = false, swipeHoriz = false;
+function setDrag(px) { contentEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
 stageEl.addEventListener("pointerdown", (e) => {
   if (e.pointerType === "mouse") return; // mouse uses the arrows
-  swiping = true; swipeX = e.clientX; swipeY = e.clientY; swipeT = Date.now();
+  swiping = true; swipeHoriz = false;
+  swipeX = e.clientX; swipeY = e.clientY; swipeT = Date.now();
+  contentEl.classList.remove("snapback");
+  contentEl.classList.add("dragging");
 });
-stageEl.addEventListener("pointerup", (e) => {
-  if (!swiping || e.pointerType === "mouse") return;
+stageEl.addEventListener("pointermove", (e) => {
+  if (!swiping) return;
+  const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
+  if (!swipeHoriz && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) swipeHoriz = true;
+  if (swipeHoriz) setDrag(Math.max(-72, Math.min(72, dx * 0.4))); // damped follow
+});
+function endSwipe(e) {
+  if (!swiping) return;
   swiping = false;
   const dx = e.clientX - swipeX, dy = e.clientY - swipeY, dt = Date.now() - swipeT;
-  if (dt < 700 && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.6) {
-    if (dx > 0) pageRight(); else pageLeft(); // swipe right -> calculators; left -> pad
+  const commit = dt < 700 && Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.4;
+  contentEl.classList.remove("dragging");
+  if (commit) {
+    setDrag(0);                                   // the new page slides in itself
+    if (dx > 0) pageLeft(); else pageRight();     // swipe right -> left page
+  } else {
+    contentEl.classList.add("snapback");          // ease back to centre
+    setDrag(0);
   }
-});
+}
+stageEl.addEventListener("pointerup", endSwipe);
+stageEl.addEventListener("pointercancel", endSwipe);
 document.getElementById("nav-left").addEventListener("click", pageLeft);
 document.getElementById("nav-right").addEventListener("click", pageRight);
 document.getElementById("page-del").addEventListener("click", deleteCurrentPage);
@@ -2069,7 +2066,6 @@ function sharePuzzle() {
 
 winHomeBtn.addEventListener("click", goHome);
 winShareBtn.addEventListener("click", sharePuzzle);
-submitEl.addEventListener("click", finishSubmitted);
 
 /* ---------------- Pause menu + theme ---------------- */
 const menuEl = document.getElementById("menu");
@@ -2113,13 +2109,34 @@ function cycleAutoSign() {
 let menuPausedElapsed = null;
 function openMenu() {
   // During a game the timer freezes; from the home screen the menu just opens.
-  if (document.body.classList.contains("playing")) {
+  const playing = document.body.classList.contains("playing");
+  if (playing) {
     menuPausedElapsed = elapsedSeconds();
     stopTimer();
     borderPath.style.animationPlayState = "paused";
   }
+  // Submit lives here now: only on a calculator page (not the sketchpad), and it
+  // submits whichever page you were on when you opened the menu.
+  const sub = document.getElementById("menu-submit");
+  if (playing && pageIndex >= 1) {
+    sub.style.display = "";
+    sub.classList.toggle("ready", allSixUsed());
+  } else {
+    sub.style.display = "none";
+  }
   menuEl.classList.remove("help-open");
   document.body.classList.add("menu-open");
+}
+
+// Submit the active calculator (locking in the frozen time) and end the game.
+function submitFromMenu() {
+  if (pageIndex < 1) return; // the sketchpad can't be submitted
+  if (menuPausedElapsed !== null) {
+    startEpoch = Date.now() - menuPausedElapsed * 1000; // score against the frozen clock
+    menuPausedElapsed = null;
+  }
+  document.body.classList.remove("menu-open");
+  finishSubmitted();
 }
 function closeMenu(resume) {
   document.body.classList.remove("menu-open");
@@ -2135,6 +2152,7 @@ timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-profile").addEventListener("click", () => showToast("Profiles & leaderboards coming soon"));
 document.getElementById("menu-close").addEventListener("click", () => closeMenu(true));
+document.getElementById("menu-submit").addEventListener("click", submitFromMenu);
 document.getElementById("menu-home").addEventListener("click", () => { closeMenu(false); goHome(); });
 document.getElementById("menu-help").addEventListener("click", () => menuEl.classList.add("help-open"));
 document.getElementById("menu-help-back").addEventListener("click", () => menuEl.classList.remove("help-open"));
