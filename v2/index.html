@@ -227,11 +227,8 @@
     cursor: pointer;
     display: none;
   }
-  body.playing.del-armed .page-del { display: block; }
-  body.playing.on-pad .page-del { display: block; }
-  @media (hover: hover) and (min-width: 720px) {
-    body.playing .page-del { display: block; }
-  }
+  body.playing.del-armed .page-del { display: block; } /* revealed by press+hold */
+  body.playing.on-pad .page-del { display: block; }    /* always on the sketchpad */
   body.won .page-del { display: none; }
   .page-del:hover { opacity: 0.7; }
 
@@ -265,12 +262,20 @@
   @keyframes pageInL { from { transform: translateX(-28px); opacity: 0.25; } to { transform: none; opacity: 1; } }
   .page-anim-r { animation: pageInR 0.22s ease; }
   .page-anim-l { animation: pageInL 0.22s ease; }
-  /* The calculator column follows the finger a little while swiping. */
-  .content.dragging { transition: none; }
-  .content.snapback { transition: transform 0.18s ease; }
+  /* Only the calculator + its calculations move/shrink — the target and the six
+     numbers stay put (like the timer). */
+  .calcwrap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transform-origin: center top; /* shrink keeps the top edge by the numbers */
+  }
+  .calcwrap.dragging { transition: none; }
+  .calcwrap.snapback { transition: transform 0.18s ease; }
   /* Long-press "selected" cue: the calculator shrinks a touch, which also opens
      up room for the x between the calculator and the dots. */
-  body.del-armed .content { transform: scale(0.93); transition: transform 0.2s ease; }
+  body.del-armed .calcwrap { transform: scale(0.93); transition: transform 0.2s ease; }
 
   .stage {
     min-height: 100vh;
@@ -737,14 +742,17 @@
 
       <div id="slots" class="slots"></div>
 
-      <div id="generated" class="generated"></div>
+      <!-- Only this part moves/shrinks on swipe & select; target + numbers stay put. -->
+      <div class="calcwrap">
+        <div id="generated" class="generated"></div>
 
-      <div class="calc">
-        <div class="history-wrap">
-          <div id="history" class="history"></div>
+        <div class="calc">
+          <div class="history-wrap">
+            <div id="history" class="history"></div>
+          </div>
+          <div id="display" class="display empty"><span class="val">00</span></div>
+          <div id="keys" class="keys"></div>
         </div>
-        <div id="display" class="display empty"><span class="val">00</span></div>
-        <div id="keys" class="keys"></div>
       </div>
     </div>
   </main>
@@ -1455,7 +1463,7 @@ function renderDots() {
 }
 
 function animatePage(goingRight) {
-  const el = pageIndex === 0 ? sketchEl : document.querySelector(".content");
+  const el = pageIndex === 0 ? sketchEl : document.querySelector(".calcwrap");
   if (!el) return;
   el.classList.remove("page-anim-r", "page-anim-l");
   void el.offsetWidth;
@@ -1620,15 +1628,16 @@ sketchEl.addEventListener("pointercancel", endPadStroke);
    distance it fires mid-gesture (no need to lift) — the old page slides off and
    the new one slides in from the other side. Reversed/natural: drag RIGHT goes
    to the page on the LEFT, drag LEFT goes to the page on the right. */
-const contentEl = document.querySelector(".content");
+const calcwrapEl = document.querySelector(".calcwrap");
 let swipeX = 0, swipeY = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false;
 let longPressTimer = null;
-function setDrag(px) { contentEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
+function setDrag(px) { calcwrapEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
 function commitDist() { return Math.min(130, window.innerWidth * 0.26); }
 
-// Long-press on empty calculator space (below the six numbers) reveals the x.
+// Press-and-hold empty calculator space (below the six numbers) reveals the x —
+// on touch and on desktop (left button), like selecting something.
 function maybeArmDelete(e) {
-  if (e.pointerType === "mouse") return; // touch only; desktop shows the x anyway
+  if (e.button && e.button !== 0) return; // primary button only (no right-click)
   if (pageIndex < 1) return;
   if (e.target.closest(".key, .gen-chip, .slot, .reel, #target, .history-wrap")) return;
   const slotsBottom = slotsEl.getBoundingClientRect().bottom;
@@ -1648,19 +1657,19 @@ function commitSwipe(s) { // s = +1 dragged right (go LEFT page), -1 (go right)
   const canMove = (s > 0 && pageIndex > 0) || (s < 0 && (pageIndex < pageCount() - 1 || willAdd));
   if (!canMove) { snapBack(); return; }
   swipeDone = true; animating = true;
-  contentEl.classList.remove("dragging");
-  contentEl.style.transition = "transform 0.16s ease-out";
+  calcwrapEl.classList.remove("dragging");
+  calcwrapEl.style.transition = "transform 0.16s ease-out";
   setDrag(s * W);                                  // old page exits in finger direction
   setTimeout(() => {
     if (willAdd) addCalcPageCore(); else gotoPageCore(s > 0 ? pageIndex - 1 : pageIndex + 1);
-    const inEl = pageIndex === 0 ? sketchEl : contentEl;
+    const inEl = pageIndex === 0 ? sketchEl : calcwrapEl;
     inEl.style.transition = "none";
     inEl.style.transform = "translateX(" + (-s * W) + "px)"; // start off the other side
     void inEl.offsetWidth;
     inEl.style.transition = "transform 0.2s ease-out";
     inEl.style.transform = "";
     setTimeout(() => {
-      contentEl.style.transition = ""; contentEl.style.transform = "";
+      calcwrapEl.style.transition = ""; calcwrapEl.style.transform = "";
       sketchEl.style.transition = ""; sketchEl.style.transform = "";
       animating = false;
     }, 220);
@@ -1668,22 +1677,24 @@ function commitSwipe(s) { // s = +1 dragged right (go LEFT page), -1 (go right)
 }
 function snapBack() {
   swipeDone = true;
-  contentEl.classList.remove("dragging");
-  contentEl.classList.add("snapback");
+  calcwrapEl.classList.remove("dragging");
+  calcwrapEl.classList.add("snapback");
   setDrag(0);
 }
 
 stageEl.addEventListener("pointerdown", (e) => {
   if (animating) return;
-  document.body.classList.remove("del-armed"); // a new touch deselects the calc
+  document.body.classList.remove("del-armed"); // a new press deselects the calc
+  swipeX = e.clientX; swipeY = e.clientY;       // recorded for both arm-cancel + swipe
   maybeArmDelete(e);
-  if (e.pointerType === "mouse") return; // mouse uses the arrows
+  if (e.pointerType === "mouse") return; // mouse arms only; navigation via arrows
   swiping = true; swipeHoriz = false; swipeDone = false;
-  swipeX = e.clientX; swipeY = e.clientY;
-  contentEl.classList.remove("snapback");
-  contentEl.classList.add("dragging");
+  calcwrapEl.classList.remove("snapback");
+  calcwrapEl.classList.add("dragging");
 });
 stageEl.addEventListener("pointermove", (e) => {
+  // moving the pointer cancels a pending press-and-hold (it's a drag, not a hold)
+  if (longPressTimer && (Math.abs(e.clientX - swipeX) > 10 || Math.abs(e.clientY - swipeY) > 10)) cancelLongPress();
   if (!swiping || swipeDone) return;
   const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
   if (!swipeHoriz && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) { swipeHoriz = true; cancelLongPress(); }
