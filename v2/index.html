@@ -597,7 +597,7 @@
     <div class="menu-view menu-main">
       <button id="menu-home" class="menu-btn">Home</button>
       <button id="menu-help" class="menu-btn">Help</button>
-      <button id="menu-auto" class="menu-btn">Auto =: on</button>
+      <button id="menu-auto" class="menu-btn">Auto (=) on</button>
       <button id="menu-theme" class="menu-btn">Dark mode</button>
     </div>
     <div class="menu-view menu-help">
@@ -710,11 +710,12 @@ function buildSlots() {
     const num = document.createElement("div");
     num.className = "slot-num";
     num.textContent = "00";
-    // v2: click a drawn number to insert it into the calculation line.
+    // v2: click a drawn number to place it into the calculation line.
     num.addEventListener("click", () => {
       if (!document.body.classList.contains("playing")) return;
-      if (!num.classList.contains("filled") || num.classList.contains("used")) return;
-      insertValue(slotValues[i]);
+      if (!num.classList.contains("filled")) return;
+      const e = available.find((x) => x.slotIndex === i);
+      if (e && !e.tentative) playNumber(e);
     });
 
     const down = document.createElement("button");
@@ -898,8 +899,9 @@ const KEYS = [
   "()", "c", "=",
 ];
 let expr = "";
-let justEvaluated = false; // main line is showing a fresh result (R alone)
-let pendingActive = false; // the latest result is still echoed on the main line
+let lineSum = null;        // value of the running result currently on the line
+let lineEntry = null;      // the available entry that running result corresponds to
+let justEvaluated = false; // kept for save/restore compatibility (unused in v2)
 let carry = null;          // kept for save/restore compatibility (unused in v2)
 let autoEqual = true;      // auto-evaluate each step (toggle in the menu)
 let undoStack = [];        // full-state snapshots so clear-once can undo
@@ -934,15 +936,15 @@ function clearAll() {
   renderHistory();
   historyWrapEl.classList.remove("expanded");
   expr = "";
-  justEvaluated = false;
-  pendingActive = false;
+  lineSum = null;
+  lineEntry = null;
   renderDisplay();
   // Fresh canvas: restore the six numbers and the available pool.
   for (let i = 0; i < SLOT_COUNT; i++) {
     slotUsed[i] = false;
-    slotParts(i).num.classList.remove("used");
   }
   if (document.body.classList.contains("playing")) initAvailable();
+  refreshSlots();
   renderGenerated();
   saveState();
 }
@@ -961,25 +963,35 @@ function onClearClick() {
 }
 
 function initAvailable() {
-  available = slotValues.map((v, i) => ({ value: v, slotIndex: i, isTarget: false }));
+  available = slotValues.map((v, i) => ({ value: v, slotIndex: i, isTarget: false, tentative: false }));
   // The target itself is usable — start from it and work down to zero.
-  if (currentTarget !== null) available.push({ value: currentTarget, slotIndex: null, isTarget: true });
+  if (currentTarget !== null) available.push({ value: currentTarget, slotIndex: null, isTarget: true, tentative: false });
+  lineSum = null;
+  lineEntry = null;
+  refreshSlots();
   renderGenerated();
 }
 
-// Clickable chips for every result made so far — the "generated numbers" row
-// that sits just under the six numbers. The latest result is faded while it's
-// still echoed on the calculator line (pendingActive); faded chips aren't
-// clickable until they're lifted up.
+// Fade each slot that is permanently used OR tentatively placed on the line.
+function refreshSlots() {
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const e = available.find((x) => x.slotIndex === i);
+    slotParts(i).num.classList.toggle("used", slotUsed[i] || !!(e && e.tentative));
+  }
+}
+
+// The generated-numbers row shows only FREED results (as reminders). A result
+// that's currently on the line, or a number tentatively placed in the current
+// equation, is not shown — so nothing shifts while you work.
 function renderGenerated() {
   generatedEl.innerHTML = "";
-  const results = available.filter((e) => e.slotIndex === null && !e.isTarget);
-  results.forEach((e, idx) => {
-    const onLine = pendingActive && idx === results.length - 1;
+  available.forEach((e) => {
+    if (e.slotIndex !== null || e.isTarget) return; // results only
+    if (e.tentative || e === lineEntry) return;     // currently in the line
     const chip = document.createElement("button");
-    chip.className = "gen-chip" + (onLine ? " faded" : "");
+    chip.className = "gen-chip";
     chip.textContent = e.value;
-    if (!onLine) chip.addEventListener("click", () => insertValue(e.value));
+    chip.addEventListener("click", () => playNumber(e));
     generatedEl.appendChild(chip);
   });
 }
@@ -997,57 +1009,54 @@ function readyToAutoEval() {
          /^√\(-?\d+(?:\.\d+)?\)$/.test(expr);
 }
 
-// Operand values in order — a "-" at the start, or after an operator / open
-// bracket, is a sign rather than subtraction, so negative results still match.
-function literalValues(s) {
-  const toks = s.match(/\d+(?:\.\d+)?|√\(|[-+x÷^()]/g) || [];
-  const vals = [];
-  let prev = "start", neg = false;
-  for (const t of toks) {
-    if (/^\d/.test(t)) { vals.push(neg ? -parseFloat(t) : parseFloat(t)); neg = false; prev = "num"; }
-    else if (t === "-") { if (prev === "start" || prev === "op" || prev === "open") neg = true; prev = "op"; }
-    else if (t === ")") { prev = "num"; }
-    else if (t === "(" || t === "√(") { prev = "open"; }
-    else { prev = "op"; } // + x ÷ ^
-  }
-  return vals;
-}
-
 // Whole-calculator snapshot so one clear-click can undo the last action.
 function pushUndo() {
   undoStack.push({
     expr: expr,
-    available: available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget })),
+    available: available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget, tentative: e.tentative })),
     slotUsed: slotUsed.slice(),
     history: history.slice(),
-    pendingActive: pendingActive,
+    lineSum: lineSum,
+    hasLineEntry: lineEntry !== null,
   });
   if (undoStack.length > 100) undoStack.shift();
 }
-function undo() {
-  if (undoStack.length === 0) return;
-  const s = undoStack.pop();
+function restoreSnapshot(s) {
   expr = s.expr;
-  available = s.available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget }));
+  available = s.available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget, tentative: e.tentative }));
   s.slotUsed.forEach((v, i) => { slotUsed[i] = v; });
   history = s.history.slice();
-  pendingActive = s.pendingActive;
-  for (let i = 0; i < SLOT_COUNT; i++) {
-    slotParts(i).num.classList.toggle("used", slotUsed[i]);
+  lineSum = s.lineSum === undefined ? null : s.lineSum;
+  lineEntry = null;
+  if (s.hasLineEntry) {
+    for (let i = available.length - 1; i >= 0; i--) {
+      const e = available[i];
+      if (e.slotIndex === null && !e.isTarget) { lineEntry = e; break; }
+    }
   }
+  refreshSlots();
   renderHistory();
   renderGenerated();
   renderDisplay();
+}
+function undo() {
+  if (undoStack.length === 0) return;
+  restoreSnapshot(undoStack.pop());
   saveState();
 }
 
-// Click a number in from the board. Two numbers in a row auto-insert "x"; when
-// auto-equal is on, a completed single operation evaluates immediately.
-function insertValue(v) {
+// Place a number (from a slot, chip, or the target) onto the line. It fades
+// immediately (tentatively used); two numbers in a row auto-insert "x"; with
+// auto-equal on, a completed single operation evaluates right away.
+function playNumber(entry) {
+  if (!entry || entry.tentative || entry === lineEntry) return;
   pushUndo();
+  entry.tentative = true;
   if (!expectingValue()) expr += "x";                  // auto-multiply
-  expr += String(v);
+  expr += String(entry.value);
   if (/^√\(-?\d+(?:\.\d+)?$/.test(expr)) expr += ")";   // auto-close a sqrt
+  refreshSlots();
+  renderGenerated();
   renderDisplay();
   if (autoEqual && readyToAutoEval()) evaluate();      // maths one step at a time
   else saveState();
@@ -1095,17 +1104,23 @@ function pressKey(label) {
   saveState();
 }
 
-// Clear the line; if a result was echoed on it (and not used), free its chip.
+// Clear the line: commit the running sum to the tape, return tentative numbers
+// to full opacity, and free the result as a reminder chip.
 function clearLine() {
+  if (lineSum !== null) { history.push(String(lineSum)); renderHistory(); }
+  available.forEach((e) => { e.tentative = false; });
+  lineEntry = null;
+  lineSum = null;
   expr = "";
-  if (pendingActive) { pendingActive = false; renderGenerated(); }
+  refreshSlots();
+  renderGenerated();
   renderDisplay();
   saveState();
 }
 
 function handleEquals() {
-  // A plain running result just commits (it's already in the working tape).
-  if (pendingActive && /^-?\d+(?:\.\d+)?$/.test(expr)) { clearLine(); return; }
+  // A plain running result just commits (free it to the tape + a chip).
+  if (lineSum !== null && /^-?\d+(?:\.\d+)?$/.test(expr)) { clearLine(); return; }
   evaluate(); // bracket / compound expressions
 }
 
@@ -1129,39 +1144,29 @@ function evaluate() {
 
   const rounded = Math.round(value * 1e6) / 1e6;
 
-  // Strict rule check: every number literal must be one of the still-available
-  // numbers (a drawn number, the target, or a result made earlier).
-  const literals = literalValues(expr);
-  const pool = available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: !!e.isTarget, taken: false }));
+  // The operands are exactly: the running result (if we continued from one)
+  // plus every number tentatively placed in this equation.
   const consumed = [];
-  for (const lit of literals) {
-    let idx = pool.findIndex((e) => !e.taken && e.value === lit && e.slotIndex !== null);
-    if (idx === -1) idx = pool.findIndex((e) => !e.taken && e.value === lit);
-    if (idx === -1) return showError(); // number not available -> illegal move
-    pool[idx].taken = true;
-    consumed.push(pool[idx]);
-  }
+  if (lineEntry) consumed.push(lineEntry);
+  available.forEach((e) => { if (e.tentative) consumed.push(e); });
 
-  // Commit: fade used drawn numbers, drop consumed entries, add the result.
-  consumed.forEach((c) => {
-    if (c.slotIndex !== null) {
-      slotUsed[c.slotIndex] = true;
-      slotParts(c.slotIndex).num.classList.add("used");
-    }
-  });
-  available = pool.filter((e) => !e.taken).map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget }));
-  available.push({ value: rounded, slotIndex: null, isTarget: false });
-  lastResult = rounded;
-
-  // Working tape: the equation, then its answer on the next line (kept for good,
-  // so the history reads equation / answer / equation / answer).
+  // History reads equation / sum / equation / sum: commit the previous sum
+  // (it's being used now) before this equation's line.
+  if (lineSum !== null) history.push(String(lineSum));
   history.push(expr);
-  history.push(String(rounded));
   renderHistory();
 
-  // The answer becomes the running value on the line (and a faded chip).
+  consumed.forEach((e) => { if (e.slotIndex !== null) slotUsed[e.slotIndex] = true; });
+  available = available.filter((e) => consumed.indexOf(e) === -1);
+  const resultEntry = { value: rounded, slotIndex: null, isTarget: false, tentative: false };
+  available.push(resultEntry);
+  lineEntry = resultEntry;
+  lineSum = rounded;
+  lastResult = rounded;
+
+  // The answer is the running value on the line only (not yet a chip / sum line).
   expr = String(rounded);
-  pendingActive = true;
+  refreshSlots();
   renderGenerated();
   renderDisplay();
   saveState();
@@ -1314,7 +1319,8 @@ function backToHome() {
   historyWrapEl.classList.remove("expanded");
   expr = "";
   justEvaluated = false;
-  pendingActive = false;
+  lineSum = null;
+  lineEntry = null;
   carry = null;
   undoStack = [];
   renderDisplay();
@@ -1341,9 +1347,11 @@ function computeScore() {
 // Make sure a freshly evaluated answer is captured in the tape before we freeze
 // the working for sharing.
 function flushAnswerToTape() {
-  if (justEvaluated && expr !== "") {
-    history.push(expr);
-    justEvaluated = false;
+  // commit the running sum so the working ends on the final answer
+  if (lineSum !== null) {
+    history.push(String(lineSum));
+    lineSum = null;
+    lineEntry = null;
   }
 }
 
@@ -1450,7 +1458,8 @@ function saveState() {
     available: available,
     expr: expr,
     justEvaluated: justEvaluated,
-    pendingActive: pendingActive,
+    lineSum: lineSum,
+    hasLineEntry: lineEntry !== null,
     carry: carry,
     lastResult: lastResult,
     lastOutcome: lastOutcome,
@@ -1501,10 +1510,17 @@ function restoreState(s) {
   if (s.largeBag) largeBag = s.largeBag.slice();
   if (s.smallBag) smallBag = s.smallBag.slice();
   history = s.history ? s.history.slice() : [];
-  available = s.available ? s.available.slice() : [];
+  available = s.available ? s.available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget, tentative: !!e.tentative })) : [];
   expr = s.expr || "";
   justEvaluated = !!s.justEvaluated;
-  pendingActive = !!s.pendingActive;
+  lineSum = s.lineSum === undefined ? null : s.lineSum;
+  lineEntry = null;
+  if (s.hasLineEntry) {
+    for (let i = available.length - 1; i >= 0; i--) {
+      const e = available[i];
+      if (e.slotIndex === null && !e.isTarget) { lineEntry = e; break; }
+    }
+  }
   carry = s.carry === undefined ? null : s.carry;
   lastResult = s.lastResult === undefined ? null : s.lastResult;
   lastOutcome = s.lastOutcome || null;
@@ -1514,6 +1530,7 @@ function restoreState(s) {
   activeShareCode = s.shareCode || null;
 
   renderHistory();
+  refreshSlots();
   renderGenerated();
   renderDisplay();
 
@@ -1629,7 +1646,7 @@ function toggleTheme() {
 
 function applyAutoEqual(on) {
   autoEqual = on;
-  document.getElementById("menu-auto").textContent = "Auto =: " + (on ? "on" : "off");
+  document.getElementById("menu-auto").textContent = "Auto (=) " + (on ? "on" : "off");
 }
 function toggleAutoEqual() {
   applyAutoEqual(!autoEqual);
@@ -1743,8 +1760,9 @@ function goHome() {
 
 function handleTargetPress() {
   if (document.body.classList.contains("playing")) {
-    // v2: click the target to insert its value (usable once, like a number).
-    if (available.some((e) => e.isTarget)) insertValue(currentTarget);
+    // v2: click the target to place its value (usable once, like a number).
+    const e = available.find((x) => x.isTarget && !x.tentative);
+    if (e) playNumber(e);
   } else {
     rollTarget();
   }
