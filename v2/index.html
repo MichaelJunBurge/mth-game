@@ -55,6 +55,8 @@
     font-family: var(--font);
     -webkit-font-smoothing: antialiased;
     transition: background 0.25s ease, color 0.25s ease;
+    /* No double-tap-to-zoom (it fired when tapping the clear key quickly). */
+    touch-action: manipulation;
   }
 
   /* Green perimeter indicator — one continuous bar, browser-animated */
@@ -95,6 +97,7 @@
   .timer {
     position: fixed;
     top: 5vh;
+    top: 5dvh;
     left: 50%;
     transform: translateX(-50%);
     text-align: center;
@@ -116,6 +119,7 @@
   .submit {
     position: fixed;
     bottom: 5vh;
+    bottom: 5dvh;
     left: 0;
     right: 0;
     text-align: center;
@@ -137,8 +141,39 @@
   /* All six numbers used: a calm "you could stop here" cue (not correctness). */
   body.playing .submit.ready { opacity: 1; color: var(--green); }
 
+  /* Home-screen icons (hamburger / profile). Shown only on the home screen;
+     they fade out once a game is entering / playing / won. */
+  .nav-icon {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    background: none;
+    border: none;
+    color: var(--ink);
+    cursor: pointer;
+    z-index: 41;
+    padding: 0.4em;
+    display: flex;
+    opacity: 0.85;
+    transition: opacity 0.3s ease, transform 0.08s;
+  }
+  .nav-icon svg {
+    width: calc(var(--size-ui) * 1.7);
+    height: calc(var(--size-ui) * 1.7);
+    display: block;
+  }
+  .nav-icon:hover { opacity: 1; }
+  .nav-icon:active { transform: translateX(-50%) scale(0.9); }
+  .nav-top { top: 5vh; top: 5dvh; }
+  .nav-bottom { bottom: 5vh; bottom: 5dvh; }
+  body.entering .nav-icon,
+  body.playing .nav-icon,
+  body.won .nav-icon { opacity: 0; pointer-events: none; }
+
   .stage {
     min-height: 100vh;
+    min-height: 100dvh; /* mobile: the *visible* height, so the block centres
+                           evenly top-to-bottom instead of sitting low */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -559,6 +594,22 @@
 
   <button id="submit" class="submit">Submit</button>
 
+  <!-- Home-screen nav: hamburger (menu) up top where the timer sits during play,
+       profile placeholder at the bottom where Submit sits. Icons, not words. -->
+  <button id="nav-menu" class="nav-icon nav-top" aria-label="Menu">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+    </svg>
+  </button>
+  <button id="nav-profile" class="nav-icon nav-bottom" aria-label="Profile (coming soon)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4.5 20c0-4 3.5-6 7.5-6s7.5 2 7.5 6" />
+    </svg>
+  </button>
+
   <main class="stage">
     <div class="content">
       <div id="target" class="target" role="button" tabindex="0" aria-label="Generate target number">
@@ -600,7 +651,7 @@
       <button id="menu-home" class="menu-btn">Home</button>
       <button id="menu-help" class="menu-btn">Help</button>
       <button id="menu-auto" class="menu-btn">Auto (=) on</button>
-      <button id="menu-sign" class="menu-btn">Auto sign: ×</button>
+      <button id="menu-sign" class="menu-btn">Auto (×)</button>
       <button id="menu-theme" class="menu-btn">Dark mode</button>
     </div>
     <div class="menu-view menu-help">
@@ -608,7 +659,7 @@
         <p>Reach the <b>target</b>, or work down to <b>0</b>, using each of the six numbers once.</p>
         <p>Tap a number (or the target) to add it to your line, then a math symbol, then another number.</p>
         <p>Each new number you make becomes a chip you can reuse.</p>
-        <p>c: tap once to undo &middot; twice to clear the line &middot; three times to wipe everything.</p>
+        <p>c: tap to undo a step, or hold it down to keep deleting. Press = to bank the line and start fresh.</p>
         <p>Auto (=) (menu) solves each step as you go; turn it off to build a full sum and press =.</p>
         <p>Auto sign (menu) picks which symbol drops in when you tap two numbers in a row.</p>
         <p>Submit turns green once all six numbers are used — a hint you can stop, not that it's right.</p>
@@ -920,9 +971,19 @@ function buildKeys() {
     if (label === "c") btn.classList.add("clear");
     if (label === "=") btn.classList.add("equals");
     btn.textContent = label;
-    // Clear key: 1 click = undo, 2 = clear line, 3 = wipe everything.
-    if (label === "c") btn.addEventListener("click", onClearClick);
-    else btn.addEventListener("click", () => pressKey(label));
+    // Clear key: tap deletes one step; press-and-hold keeps deleting until you
+    // let go (no double/triple tap — that triggered zoom on mobile).
+    if (label === "c") {
+      btn.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+        startClearHold();
+      });
+      btn.addEventListener("pointerup", stopClearHold);
+      btn.addEventListener("pointercancel", stopClearHold);
+    } else {
+      btn.addEventListener("click", () => pressKey(label));
+    }
     keysEl.appendChild(btn);
   });
 }
@@ -955,17 +1016,19 @@ function clearAll() {
   saveState();
 }
 
-// Clear key: count clicks in a short burst — 1 = undo, 2 = clear line, 3 = wipe.
-let clearClicks = 0, clearTimer = null;
-function onClearClick() {
-  clearClicks++;
-  clearTimeout(clearTimer);
-  clearTimer = setTimeout(() => {
-    if (clearClicks === 1) undo();
-    else if (clearClicks === 2) { pushUndo(); clearLine(); }
-    else { pushUndo(); clearAll(); }
-    clearClicks = 0;
-  }, 260);
+// Clear key: a tap is one undo; holding repeats it (after a short delay) until
+// the finger lifts, so you can wind the whole line back without tapping.
+let clearHoldDelay = null, clearHoldRepeat = null;
+function startClearHold() {
+  undo();                                    // immediate single step
+  clearHoldDelay = setTimeout(() => {
+    clearHoldRepeat = setInterval(undo, 110);
+  }, 350);
+}
+function stopClearHold() {
+  clearTimeout(clearHoldDelay);
+  clearInterval(clearHoldRepeat);
+  clearHoldDelay = clearHoldRepeat = null;
 }
 
 function initAvailable() {
@@ -1682,7 +1745,7 @@ function toggleAutoEqual() {
 
 function applyAutoSign(sign) {
   autoSign = SIGN_CYCLE.indexOf(sign) === -1 ? "x" : sign;
-  document.getElementById("menu-sign").textContent = "Auto sign: " + SIGN_LABEL[autoSign];
+  document.getElementById("menu-sign").textContent = "Auto (" + SIGN_LABEL[autoSign] + ")";
 }
 function cycleAutoSign() {
   const next = SIGN_CYCLE[(SIGN_CYCLE.indexOf(autoSign) + 1) % SIGN_CYCLE.length];
@@ -1692,10 +1755,12 @@ function cycleAutoSign() {
 
 let menuPausedElapsed = null;
 function openMenu() {
-  if (!document.body.classList.contains("playing")) return;
-  menuPausedElapsed = elapsedSeconds(); // freeze the clock
-  stopTimer();
-  borderPath.style.animationPlayState = "paused";
+  // During a game the timer freezes; from the home screen the menu just opens.
+  if (document.body.classList.contains("playing")) {
+    menuPausedElapsed = elapsedSeconds();
+    stopTimer();
+    borderPath.style.animationPlayState = "paused";
+  }
   menuEl.classList.remove("help-open");
   document.body.classList.add("menu-open");
 }
@@ -1710,6 +1775,8 @@ function closeMenu(resume) {
 }
 
 timerEl.addEventListener("click", openMenu);
+document.getElementById("nav-menu").addEventListener("click", openMenu);
+document.getElementById("nav-profile").addEventListener("click", () => showToast("Profiles & leaderboards coming soon"));
 document.getElementById("menu-close").addEventListener("click", () => closeMenu(true));
 document.getElementById("menu-home").addEventListener("click", () => { closeMenu(false); goHome(); });
 document.getElementById("menu-help").addEventListener("click", () => menuEl.classList.add("help-open"));
