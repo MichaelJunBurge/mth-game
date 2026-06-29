@@ -1051,8 +1051,13 @@ function undo() {
 function playNumber(entry) {
   if (!entry || entry.tentative || entry === lineEntry) return;
   pushUndo();
+  if (!expectingValue()) {                             // auto-multiply
+    expr += "x";
+    // Extra undo point: one clear-click then removes just the number and keeps
+    // the operator, so it's easy to swap in a different number.
+    pushUndo();
+  }
   entry.tentative = true;
-  if (!expectingValue()) expr += "x";                  // auto-multiply
   expr += String(entry.value);
   if (/^√\(-?\d+(?:\.\d+)?$/.test(expr)) expr += ")";   // auto-close a sqrt
   refreshSlots();
