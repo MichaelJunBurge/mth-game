@@ -597,6 +597,7 @@
     <div class="menu-view menu-main">
       <button id="menu-home" class="menu-btn">Home</button>
       <button id="menu-help" class="menu-btn">Help</button>
+      <button id="menu-auto" class="menu-btn">Auto =: on</button>
       <button id="menu-theme" class="menu-btn">Dark mode</button>
     </div>
     <div class="menu-view menu-help">
@@ -604,7 +605,8 @@
         <p>Reach the <b>target</b>, or work down to <b>0</b>, using each of the six numbers once.</p>
         <p>Tap a number (or the target) to add it to your line, then a math symbol, then another number.</p>
         <p>Each new number you make becomes a chip you can reuse.</p>
-        <p>c clears the line &middot; double-tap c wipes everything.</p>
+        <p>c: tap once to undo &middot; twice to clear the line &middot; three times to wipe everything.</p>
+        <p>Auto = (menu) solves each step as you go; turn it off to build a full sum and press =.</p>
       </div>
       <button id="menu-help-back" class="menu-btn">Back</button>
     </div>
@@ -899,6 +901,8 @@ let expr = "";
 let justEvaluated = false; // main line is showing a fresh result (R alone)
 let pendingActive = false; // the latest result is still echoed on the main line
 let carry = null;          // kept for save/restore compatibility (unused in v2)
+let autoEqual = true;      // auto-evaluate each step (toggle in the menu)
+let undoStack = [];        // full-state snapshots so clear-once can undo
 
 function buildKeys() {
   keysEl.innerHTML = "";
@@ -908,9 +912,9 @@ function buildKeys() {
     if (label === "c") btn.classList.add("clear");
     if (label === "=") btn.classList.add("equals");
     btn.textContent = label;
-    btn.addEventListener("click", () => pressKey(label));
-    // Double-clicking the red clear wipes the whole tape back to blank.
-    if (label === "c") btn.addEventListener("dblclick", clearAll);
+    // Clear key: 1 click = undo, 2 = clear line, 3 = wipe everything.
+    if (label === "c") btn.addEventListener("click", onClearClick);
+    else btn.addEventListener("click", () => pressKey(label));
     keysEl.appendChild(btn);
   });
 }
@@ -941,6 +945,19 @@ function clearAll() {
   if (document.body.classList.contains("playing")) initAvailable();
   renderGenerated();
   saveState();
+}
+
+// Clear key: count clicks in a short burst — 1 = undo, 2 = clear line, 3 = wipe.
+let clearClicks = 0, clearTimer = null;
+function onClearClick() {
+  clearClicks++;
+  clearTimeout(clearTimer);
+  clearTimer = setTimeout(() => {
+    if (clearClicks === 1) undo();
+    else if (clearClicks === 2) { pushUndo(); clearLine(); }
+    else { pushUndo(); clearAll(); }
+    clearClicks = 0;
+  }, 260);
 }
 
 function initAvailable() {
@@ -996,14 +1013,43 @@ function literalValues(s) {
   return vals;
 }
 
-// Click a number in from the board. Two numbers in a row auto-insert "x"; a
-// completed single operation auto-evaluates.
+// Whole-calculator snapshot so one clear-click can undo the last action.
+function pushUndo() {
+  undoStack.push({
+    expr: expr,
+    available: available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget })),
+    slotUsed: slotUsed.slice(),
+    history: history.slice(),
+    pendingActive: pendingActive,
+  });
+  if (undoStack.length > 100) undoStack.shift();
+}
+function undo() {
+  if (undoStack.length === 0) return;
+  const s = undoStack.pop();
+  expr = s.expr;
+  available = s.available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget }));
+  s.slotUsed.forEach((v, i) => { slotUsed[i] = v; });
+  history = s.history.slice();
+  pendingActive = s.pendingActive;
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    slotParts(i).num.classList.toggle("used", slotUsed[i]);
+  }
+  renderHistory();
+  renderGenerated();
+  renderDisplay();
+  saveState();
+}
+
+// Click a number in from the board. Two numbers in a row auto-insert "x"; when
+// auto-equal is on, a completed single operation evaluates immediately.
 function insertValue(v) {
+  pushUndo();
   if (!expectingValue()) expr += "x";                  // auto-multiply
   expr += String(v);
   if (/^√\(-?\d+(?:\.\d+)?$/.test(expr)) expr += ")";   // auto-close a sqrt
   renderDisplay();
-  if (readyToAutoEval()) evaluate();                   // maths one step at a time
+  if (autoEqual && readyToAutoEval()) evaluate();      // maths one step at a time
   else saveState();
 }
 
@@ -1027,13 +1073,21 @@ function renderDisplay() {
 }
 
 function pressKey(label) {
-  if (label === "c") { commitLine(); return; }
-  if (label === "=") { handleEquals(); return; }
+  // The clear key is handled separately (multi-click) and never reaches here.
+  if (label === "=") { pushUndo(); handleEquals(); return; }
+  pushUndo();
   if (label === "()") { expr += nextBracket(); renderDisplay(); saveState(); return; }
   if (label === "√") {
-    // sqrt of the current single value (one step), else start a sqrt group
-    if (/^-?\d+(?:\.\d+)?$/.test(expr)) { expr = "√(" + expr + ")"; renderDisplay(); evaluate(); }
-    else { expr += "√("; renderDisplay(); saveState(); }
+    // sqrt of the current single value, else start a sqrt group
+    if (/^-?\d+(?:\.\d+)?$/.test(expr)) {
+      expr = "√(" + expr + ")";
+      renderDisplay();
+      if (autoEqual) evaluate(); else saveState();
+    } else {
+      expr += "√(";
+      renderDisplay();
+      saveState();
+    }
     return;
   }
   expr += label; // binary operator: + - x ÷ ^
@@ -1042,7 +1096,7 @@ function pressKey(label) {
 }
 
 // Clear the line; if a result was echoed on it (and not used), free its chip.
-function commitLine() {
+function clearLine() {
   expr = "";
   if (pendingActive) { pendingActive = false; renderGenerated(); }
   renderDisplay();
@@ -1051,7 +1105,7 @@ function commitLine() {
 
 function handleEquals() {
   // A plain running result just commits (it's already in the working tape).
-  if (pendingActive && /^-?\d+(?:\.\d+)?$/.test(expr)) { commitLine(); return; }
+  if (pendingActive && /^-?\d+(?:\.\d+)?$/.test(expr)) { clearLine(); return; }
   evaluate(); // bracket / compound expressions
 }
 
@@ -1262,6 +1316,7 @@ function backToHome() {
   justEvaluated = false;
   pendingActive = false;
   carry = null;
+  undoStack = [];
   renderDisplay();
   clearSave();
   window.history.replaceState({}, "", location.pathname);
@@ -1559,6 +1614,7 @@ submitEl.addEventListener("click", finishSubmitted);
 /* ---------------- Pause menu + theme ---------------- */
 const menuEl = document.getElementById("menu");
 const THEME_KEY = "numbersRound.theme.v2";
+const AUTOEQ_KEY = "numbersRound.autoeq.v2";
 
 function applyTheme(theme) {
   const dark = theme === "dark";
@@ -1569,6 +1625,15 @@ function toggleTheme() {
   const dark = !document.body.classList.contains("dark");
   applyTheme(dark ? "dark" : "light");
   try { localStorage.setItem(THEME_KEY, dark ? "dark" : "light"); } catch (e) {}
+}
+
+function applyAutoEqual(on) {
+  autoEqual = on;
+  document.getElementById("menu-auto").textContent = "Auto =: " + (on ? "on" : "off");
+}
+function toggleAutoEqual() {
+  applyAutoEqual(!autoEqual);
+  try { localStorage.setItem(AUTOEQ_KEY, autoEqual ? "on" : "off"); } catch (e) {}
 }
 
 let menuPausedElapsed = null;
@@ -1596,6 +1661,7 @@ document.getElementById("menu-home").addEventListener("click", () => { closeMenu
 document.getElementById("menu-help").addEventListener("click", () => menuEl.classList.add("help-open"));
 document.getElementById("menu-help-back").addEventListener("click", () => menuEl.classList.remove("help-open"));
 document.getElementById("menu-theme").addEventListener("click", toggleTheme);
+document.getElementById("menu-auto").addEventListener("click", toggleAutoEqual);
 
 // Open a shared puzzle straight into play mode. Modern links use ?g=<base64>;
 // the old ?t=&n= form is still accepted.
@@ -1746,6 +1812,7 @@ renderHistory();
 setArrowsEnabled(false); // can't draw numbers until a target is generated
 layoutBorder();
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
+applyAutoEqual((localStorage.getItem(AUTOEQ_KEY) || "on") !== "off");
 
 // On load: restore an in-progress game unless the URL points at a *different*
 // shared puzzle (a fresh challenge link). Otherwise open whatever the URL has.
