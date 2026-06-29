@@ -288,8 +288,6 @@
   }
   .gen-chip:hover { transform: scale(1.12); }
   .gen-chip:active { transform: scale(0.92); }
-  /* faded while the result is still echoed on the calculator line */
-  .gen-chip.faded { opacity: 0.2; pointer-events: none; cursor: default; }
 
   /* Calculator — hidden until all six numbers are drawn.
      The 5 key columns are widened to span the 6 numbers' centres
@@ -956,9 +954,10 @@ const KEYS = [
 ];
 let expr = "";
 let lineSum = null;        // value of the running result currently on the line
-let lineEntry = null;      // the available entry that running result corresponds to
-let justEvaluated = false; // kept for save/restore compatibility (unused in v2)
-let carry = null;          // kept for save/restore compatibility (unused in v2)
+// The available entry for that running result. Invariant: when lineSum !== null,
+// lineEntry is the LAST result entry in `available` (slotIndex null, !isTarget) —
+// that's how undo/restore re-derive it. Keep evaluate()/clearLine() consistent.
+let lineEntry = null;
 let autoEqual = true;      // auto-evaluate each step (toggle in the menu)
 let autoSign = "x";        // sign auto-inserted between two numbers (menu choice)
 let undoStack = [];        // full-state snapshots so clear-once can undo
@@ -996,24 +995,6 @@ function renderHistory() {
     d.textContent = line;
     historyEl.appendChild(d);
   });
-}
-
-function clearAll() {
-  history = [];
-  renderHistory();
-  historyWrapEl.classList.remove("expanded");
-  expr = "";
-  lineSum = null;
-  lineEntry = null;
-  renderDisplay();
-  // Fresh canvas: restore the six numbers and the available pool.
-  for (let i = 0; i < SLOT_COUNT; i++) {
-    slotUsed[i] = false;
-  }
-  if (document.body.classList.contains("playing")) initAvailable();
-  refreshSlots();
-  renderGenerated();
-  saveState();
 }
 
 // Clear key: a tap is one undo; holding repeats it (after a short delay) until
@@ -1404,10 +1385,8 @@ function backToHome() {
   renderGenerated();
   historyWrapEl.classList.remove("expanded");
   expr = "";
-  justEvaluated = false;
   lineSum = null;
   lineEntry = null;
-  carry = null;
   undoStack = [];
   renderDisplay();
   clearSave();
@@ -1560,10 +1539,8 @@ function saveState() {
     history: history,
     available: available,
     expr: expr,
-    justEvaluated: justEvaluated,
     lineSum: lineSum,
     hasLineEntry: lineEntry !== null,
-    carry: carry,
     lastResult: lastResult,
     lastOutcome: lastOutcome,
     sharedGame: sharedGame,
@@ -1615,7 +1592,6 @@ function restoreState(s) {
   history = s.history ? s.history.slice() : [];
   available = s.available ? s.available.map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget, tentative: !!e.tentative })) : [];
   expr = s.expr || "";
-  justEvaluated = !!s.justEvaluated;
   lineSum = s.lineSum === undefined ? null : s.lineSum;
   lineEntry = null;
   if (s.hasLineEntry) {
@@ -1624,7 +1600,6 @@ function restoreState(s) {
       if (e.slotIndex === null && !e.isTarget) { lineEntry = e; break; }
     }
   }
-  carry = s.carry === undefined ? null : s.carry;
   lastResult = s.lastResult === undefined ? null : s.lastResult;
   lastOutcome = s.lastOutcome || null;
   sharedGame = s.sharedGame || null;
