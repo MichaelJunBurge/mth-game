@@ -134,6 +134,8 @@
   }
   body.playing .submit { opacity: 0.2; pointer-events: auto; }
   body.playing .submit:hover { opacity: 1; }
+  /* All six numbers used: a calm "you could stop here" cue (not correctness). */
+  body.playing .submit.ready { opacity: 1; color: var(--green); }
 
   .stage {
     min-height: 100vh;
@@ -598,6 +600,7 @@
       <button id="menu-home" class="menu-btn">Home</button>
       <button id="menu-help" class="menu-btn">Help</button>
       <button id="menu-auto" class="menu-btn">Auto (=) on</button>
+      <button id="menu-sign" class="menu-btn">Auto sign: ×</button>
       <button id="menu-theme" class="menu-btn">Dark mode</button>
     </div>
     <div class="menu-view menu-help">
@@ -606,7 +609,9 @@
         <p>Tap a number (or the target) to add it to your line, then a math symbol, then another number.</p>
         <p>Each new number you make becomes a chip you can reuse.</p>
         <p>c: tap once to undo &middot; twice to clear the line &middot; three times to wipe everything.</p>
-        <p>Auto = (menu) solves each step as you go; turn it off to build a full sum and press =.</p>
+        <p>Auto (=) (menu) solves each step as you go; turn it off to build a full sum and press =.</p>
+        <p>Auto sign (menu) picks which symbol drops in when you tap two numbers in a row.</p>
+        <p>Submit turns green once all six numbers are used — a hint you can stop, not that it's right.</p>
       </div>
       <button id="menu-help-back" class="menu-btn">Back</button>
     </div>
@@ -894,9 +899,9 @@ function stopTimer() {
 // v2: no digit pad — numbers are clicked in from the board above. Only
 // operators live on the keypad, in a 3x3 grid. "()" is one smart bracket.
 const KEYS = [
-  "+", "-", "x",
-  "÷", "^", "√",
-  "()", "c", "=",
+  "+", "x", "^",
+  "-", "÷", "√",
+  "c", "()", "=",
 ];
 let expr = "";
 let lineSum = null;        // value of the running result currently on the line
@@ -904,6 +909,7 @@ let lineEntry = null;      // the available entry that running result correspond
 let justEvaluated = false; // kept for save/restore compatibility (unused in v2)
 let carry = null;          // kept for save/restore compatibility (unused in v2)
 let autoEqual = true;      // auto-evaluate each step (toggle in the menu)
+let autoSign = "x";        // sign auto-inserted between two numbers (menu choice)
 let undoStack = [];        // full-state snapshots so clear-once can undo
 
 function buildKeys() {
@@ -978,6 +984,14 @@ function refreshSlots() {
     const e = available.find((x) => x.slotIndex === i);
     slotParts(i).num.classList.toggle("used", slotUsed[i] || !!(e && e.tentative));
   }
+  updateSubmitReady();
+}
+
+// Submit turns (and stays) green once all six numbers are used — a hint that
+// you could stop here. It does NOT mean the answer is the target.
+function updateSubmitReady() {
+  const allUsed = SLOT_COUNT > 0 && slotUsed.every(Boolean);
+  submitEl.classList.toggle("ready", allUsed);
 }
 
 // The generated-numbers row shows only FREED results (as reminders). A result
@@ -1046,14 +1060,14 @@ function undo() {
 }
 
 // Place a number (from a slot, chip, or the target) onto the line. It fades
-// immediately (tentatively used); two numbers in a row auto-insert "x"; with
-// auto-equal on, a completed single operation evaluates right away.
+// immediately (tentatively used); two numbers in a row auto-insert the chosen
+// auto-sign; with auto-equal on, a completed single operation evaluates.
 function playNumber(entry) {
   if (!entry || entry.tentative || entry === lineEntry) return;
   pushUndo();
-  if (!expectingValue()) {                             // auto-multiply
-    expr += "x";
-    // Extra undo point: one clear-click then removes just the number and keeps
+  if (!expectingValue()) {                             // auto-sign between numbers
+    expr += autoSign;
+    // Extra undo point: a clear-click then removes just the number and keeps
     // the operator, so it's easy to swap in a different number.
     pushUndo();
   }
@@ -1063,8 +1077,12 @@ function playNumber(entry) {
   refreshSlots();
   renderGenerated();
   renderDisplay();
-  if (autoEqual && readyToAutoEval()) evaluate();      // maths one step at a time
-  else saveState();
+  if (autoEqual && readyToAutoEval()) {
+    // Snapshot the finished equation first, so one clear-click clears the sum
+    // line and shows the whole equation again (matching auto-equal off).
+    pushUndo();
+    evaluate();
+  } else saveState();
 }
 
 // One bracket button: closes an open "(" when we're right after a value,
@@ -1096,7 +1114,7 @@ function pressKey(label) {
     if (/^-?\d+(?:\.\d+)?$/.test(expr)) {
       expr = "√(" + expr + ")";
       renderDisplay();
-      if (autoEqual) evaluate(); else saveState();
+      if (autoEqual) { pushUndo(); evaluate(); } else saveState();
     } else {
       expr += "√(";
       renderDisplay();
@@ -1637,6 +1655,10 @@ submitEl.addEventListener("click", finishSubmitted);
 const menuEl = document.getElementById("menu");
 const THEME_KEY = "numbersRound.theme.v2";
 const AUTOEQ_KEY = "numbersRound.autoeq.v2";
+const AUTOSIGN_KEY = "numbersRound.autosign.v2";
+// Signs that can be auto-placed between two consecutive numbers.
+const SIGN_CYCLE = ["x", "+", "-", "÷", "^"];
+const SIGN_LABEL = { "x": "×", "+": "+", "-": "−", "÷": "÷", "^": "^" };
 
 function applyTheme(theme) {
   const dark = theme === "dark";
@@ -1656,6 +1678,16 @@ function applyAutoEqual(on) {
 function toggleAutoEqual() {
   applyAutoEqual(!autoEqual);
   try { localStorage.setItem(AUTOEQ_KEY, autoEqual ? "on" : "off"); } catch (e) {}
+}
+
+function applyAutoSign(sign) {
+  autoSign = SIGN_CYCLE.indexOf(sign) === -1 ? "x" : sign;
+  document.getElementById("menu-sign").textContent = "Auto sign: " + SIGN_LABEL[autoSign];
+}
+function cycleAutoSign() {
+  const next = SIGN_CYCLE[(SIGN_CYCLE.indexOf(autoSign) + 1) % SIGN_CYCLE.length];
+  applyAutoSign(next);
+  try { localStorage.setItem(AUTOSIGN_KEY, autoSign); } catch (e) {}
 }
 
 let menuPausedElapsed = null;
@@ -1684,6 +1716,7 @@ document.getElementById("menu-help").addEventListener("click", () => menuEl.clas
 document.getElementById("menu-help-back").addEventListener("click", () => menuEl.classList.remove("help-open"));
 document.getElementById("menu-theme").addEventListener("click", toggleTheme);
 document.getElementById("menu-auto").addEventListener("click", toggleAutoEqual);
+document.getElementById("menu-sign").addEventListener("click", cycleAutoSign);
 
 // Open a shared puzzle straight into play mode. Modern links use ?g=<base64>;
 // the old ?t=&n= form is still accepted.
@@ -1836,6 +1869,7 @@ setArrowsEnabled(false); // can't draw numbers until a target is generated
 layoutBorder();
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
 applyAutoEqual((localStorage.getItem(AUTOEQ_KEY) || "on") !== "off");
+applyAutoSign(localStorage.getItem(AUTOSIGN_KEY) || "x");
 
 // On load: restore an in-progress game unless the URL points at a *different*
 // shared puzzle (a fresh challenge link). Otherwise open whatever the URL has.
