@@ -329,14 +329,15 @@
      up room for the x between the calculator and the dots. */
   body.del-armed .calcwrap { transform: scale(0.93); transition: transform 0.2s ease; }
 
-  /* Swipe-down on an empty calculator: everything above the keypad dips down a
-     little and springs back (origin at the bottom keeps the keypad in place). */
+  /* Swipe-down on an empty calculator: the calculation history, 00 line and keys
+     dip down a little and spring back (origin at the bottom keeps the keys put).
+     Only the .calc moves — target / numbers / chips are untouched. */
   @keyframes calcSpring {
     0% { transform: scaleY(1); }
     38% { transform: scaleY(0.955); }
     100% { transform: scaleY(1); }
   }
-  .content.spring { animation: calcSpring 0.46s cubic-bezier(0.36, 0.07, 0.19, 0.97); transform-origin: center bottom; }
+  .calc.spring { animation: calcSpring 0.46s cubic-bezier(0.36, 0.07, 0.19, 0.97); transform-origin: center bottom; }
 
   .stage {
     position: relative; /* so it can sit above the sketchpad canvas on the pad */
@@ -496,12 +497,11 @@
   .history {
     display: flex;
     flex-direction: column;
-    justify-content: flex-start; /* top-anchored: new lines grow DOWN, old ones
-                                    never move up; spare space sits below */
+    justify-content: flex-end; /* newest line sits directly above the 00 line */
     align-items: flex-end;
     gap: 0.5em;
     line-height: 1.15;
-    height: 5.2em;            /* three lines fully visible, a 4th fading at bottom */
+    height: 5.2em;            /* three lines fully visible, a 4th fading at top */
     overflow: hidden;
     font-size: var(--size-ui);
     font-weight: 400;
@@ -519,9 +519,9 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    /* fade the BOTTOM (newest overflow) so it hints there's more to reveal by
-       expanding, while the top lines stay put */
-    background: linear-gradient(to top, var(--bg) 0%, var(--bg) 4%, transparent 75%);
+    /* white at the top fading down toward the main line — older lines fade out,
+       hinting there's more to reveal by tapping */
+    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 4%, transparent 75%);
   }
   .history:not(:empty) { cursor: pointer; }
   /* Tapping the tape drops the fade and reveals every line in full. */
@@ -1764,16 +1764,15 @@ sketchEl.addEventListener("pointercancel", endPadStroke);
    the new one slides in from the other side. Reversed/natural: drag RIGHT goes
    to the page on the LEFT, drag LEFT goes to the page on the right. */
 const calcwrapEl = document.querySelector(".calcwrap");
-const contentColEl = document.querySelector(".content");
 let swipeX = 0, swipeY = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null;
 let longPressTimer = null;
 
-// Empty-calc swipe-down: dip everything above the keypad down and spring back.
+// Empty-calc swipe-down: dip just the calc (history + 00 line + keys) and back.
 function springCalc() {
-  contentColEl.classList.remove("spring");
-  void contentColEl.offsetWidth;
-  contentColEl.classList.add("spring");
-  setTimeout(() => contentColEl.classList.remove("spring"), 480);
+  calcEl.classList.remove("spring");
+  void calcEl.offsetWidth;
+  calcEl.classList.add("spring");
+  setTimeout(() => calcEl.classList.remove("spring"), 480);
 }
 function setDrag(px) { calcwrapEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
 function commitDist() { return Math.min(130, window.innerWidth * 0.26); }
@@ -1863,10 +1862,16 @@ function endSwipe(e) {
   const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
   if (swipeAxis === "v" && Math.abs(dy) > 50 && Math.abs(dy) > Math.abs(dx) * 1.3) {
     calcwrapEl.classList.remove("dragging");
-    if (dy < 0) { openMenu(); }                    // swipe up -> menu
-    else if (historyWrapEl.classList.contains("expanded")) { collapseTape(); } // down -> toggle
-    else if (history.length > 0) { expandTape(); } // down -> reveal calculations
-    else { springCalc(); }                         // down on an empty calc -> bounce
+    // Vertical stack: equations(down) - normal - menu(up). Each swipe moves one
+    // step; the menu's own swipe-down (below) handles closing it.
+    if (dy < 0) {                                            // swipe up
+      if (historyWrapEl.classList.contains("expanded")) collapseTape(); // close equations
+      else openMenu();                                      // ...then open the menu
+    } else {                                                // swipe down
+      if (historyWrapEl.classList.contains("expanded")) { /* already down */ }
+      else if (history.length > 0) expandTape();            // open equations
+      else springCalc();                                    // empty -> bounce
+    }
     return;
   }
   snapBack(); // horizontal that didn't commit -> ease back
@@ -2557,6 +2562,20 @@ timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-profile").addEventListener("click", () => showToast("Profiles & leaderboards coming soon"));
 document.getElementById("menu-close").addEventListener("click", () => closeMenu(true));
+
+// Swipe down on the menu to close it (mirrors swipe-up to open it).
+let menuSwipeY = 0, menuSwipeX = 0, menuSwiping = false;
+menuEl.addEventListener("pointerdown", (e) => {
+  if (e.pointerType === "mouse") return;
+  menuSwiping = true; menuSwipeY = e.clientY; menuSwipeX = e.clientX;
+});
+menuEl.addEventListener("pointerup", (e) => {
+  if (!menuSwiping || e.pointerType === "mouse") return;
+  menuSwiping = false;
+  const dy = e.clientY - menuSwipeY, dx = e.clientX - menuSwipeX;
+  if (dy > 50 && dy > Math.abs(dx) * 1.3) closeMenu(true); // swipe down -> close
+});
+menuEl.addEventListener("pointercancel", () => { menuSwiping = false; });
 document.getElementById("menu-submit").addEventListener("click", submitFromMenu);
 document.getElementById("menu-resume").addEventListener("click", () => closeMenu(true));
 document.getElementById("menu-reset").addEventListener("click", () => { closeMenu(false); restartShared(); });
