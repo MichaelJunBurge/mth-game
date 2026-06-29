@@ -236,9 +236,31 @@
     display: none;
   }
   body.playing.del-armed .page-del { display: block; } /* revealed by press+hold */
-  body.playing.on-pad .page-del { display: block; }    /* always on the sketchpad */
   body.won .page-del { display: none; }
+  body.on-pad .page-del { display: none; }             /* pad uses the undo button */
   .page-del:hover { opacity: 0.7; }
+
+  /* Sketchpad undo (tap = undo last stroke, hold = clear). Sits above the dots,
+     the same distance from them as they are from the bottom (set in JS). */
+  .pad-undo {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(10dvh + env(safe-area-inset-bottom, 0px));
+    z-index: 43;
+    background: none;
+    border: none;
+    color: var(--ink);
+    opacity: 0.3;
+    cursor: pointer;
+    padding: 0.4em;
+    display: none;
+  }
+  .pad-undo svg { width: calc(var(--size-ui) * 1.5); height: calc(var(--size-ui) * 1.5); display: block; }
+  body.on-pad .pad-undo { display: block; }
+  body.won .pad-undo { display: none; }
+  .pad-undo:hover { opacity: 0.7; }
+  .pad-undo:active { transform: translateX(-50%) scale(0.9); }
 
   /* Side arrows. Shown on pointer/wide screens, and always on the sketchpad
      (there, the surface is for drawing so you can't swipe to leave). */
@@ -387,13 +409,15 @@
   .generated {
     width: 100%;
     margin-top: 1.6vh;
+    /* Always reserve a row's height so freeing a result into a chip doesn't
+       shift the target / numbers / keypad. */
+    min-height: calc(var(--size-number) * 1.25);
     display: grid;
     grid-auto-flow: column;
     grid-auto-columns: calc(100% / 6);
     justify-content: center;
     justify-items: center;
   }
-  .generated:empty { display: none; } /* no gap until a result exists */
   .gen-chip {
     background: none;
     border: none;
@@ -509,7 +533,7 @@
     margin-left: -12.5%;
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    row-gap: calc(var(--app-w) * 0.135); /* compact keypad — more screen space */
+    row-gap: calc(var(--app-w) * 0.108); /* compact keypad — tighter rows */
     justify-items: center;
   }
   .key {
@@ -738,6 +762,12 @@
   <!-- Page nav: dots (one per page), delete-current, and desktop side arrows. -->
   <div id="dots" class="dots"></div>
   <button id="page-del" class="page-del" aria-label="Delete this page">&times;</button>
+  <button id="pad-undo" class="pad-undo" aria-label="Undo last stroke (hold to clear)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  </button>
   <button id="nav-left" class="pager-arrow left" aria-label="Previous page">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5 L8 12 L15 19" /></svg>
   </button>
@@ -1506,6 +1536,15 @@ function positionPageDel() {
     mid = (window.innerHeight * 0.78 + dotsTop) / 2; // sketchpad has no keypad
   }
   del.style.top = Math.round(mid) + "px";
+  positionPadUndo();
+}
+// Sketchpad undo button: its gap to the dots equals the dots' gap to the bottom.
+function positionPadUndo() {
+  const undo = document.getElementById("pad-undo");
+  const r = dotsEl.getBoundingClientRect();
+  if (!r.height) return;
+  const gap = window.innerHeight - r.bottom;           // dots -> bottom
+  undo.style.bottom = Math.round(window.innerHeight - r.top + gap) + "px";
 }
 
 // Switch pages WITHOUT animation (the state change). Returns true if it moved.
@@ -1674,7 +1713,10 @@ function commitDist() { return Math.min(130, window.innerWidth * 0.26); }
 function maybeArmDelete(e) {
   if (e.button && e.button !== 0) return; // primary button only (no right-click)
   if (pageIndex < 1) return;
-  if (e.target.closest(".key, .gen-chip, .slot, .reel, #target, .history-wrap")) return;
+  if (e.target.closest(".key, .gen-chip, .slot, .reel, #target")) return;
+  // Collapsed: a tap on the tape expands it, so don't arm there. Expanded: the
+  // tape fills the area, so holding it should still arm the delete.
+  if (!document.body.classList.contains("tape-open") && e.target.closest(".history-wrap")) return;
   const slotsBottom = slotsEl.getBoundingClientRect().bottom;
   if (e.clientY <= slotsBottom) return;
   longPressTimer = setTimeout(() => {
@@ -1749,6 +1791,24 @@ stageEl.addEventListener("pointercancel", endSwipe);
 document.getElementById("nav-left").addEventListener("click", pageLeft);
 document.getElementById("nav-right").addEventListener("click", pageRight);
 document.getElementById("page-del").addEventListener("click", deleteCurrentPage);
+
+// Sketchpad undo button: tap undoes the last stroke, hold clears the whole page.
+const padUndoEl = document.getElementById("pad-undo");
+let padUndoTimer = null, padUndoHeld = false;
+padUndoEl.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  padUndoHeld = false;
+  padUndoTimer = setTimeout(() => {
+    padUndoHeld = true;
+    padStrokes = []; redrawSketch(); saveState(); // hold = clear
+  }, 450);
+});
+function endPadUndo() {
+  clearTimeout(padUndoTimer);
+  if (!padUndoHeld && padStrokes.length) { padStrokes.pop(); redrawSketch(); saveState(); } // tap = undo one
+}
+padUndoEl.addEventListener("pointerup", endPadUndo);
+padUndoEl.addEventListener("pointercancel", () => clearTimeout(padUndoTimer));
 
 /* ---------------- Round flow ---------------- */
 // Collapse the (already faded) arrows from their natural height to zero, in
@@ -2579,6 +2639,8 @@ function expandTape() {
   document.body.classList.add("tape-open");   // hides the keypad
 }
 historyWrapEl.addEventListener("click", () => {
+  // A press-and-hold armed the delete instead of toggling the tape.
+  if (document.body.classList.contains("del-armed")) return;
   if (historyWrapEl.classList.contains("expanded")) collapseTape();
   else expandTape();
 });
