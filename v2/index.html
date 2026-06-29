@@ -159,6 +159,9 @@
   body.entering .nav-icon,
   body.playing .nav-icon,
   body.won .nav-icon { opacity: 0; pointer-events: none; }
+  /* During a shared-intro replay the hamburger + profile stay available (so a
+     new player can read Help before the puzzle starts) — even while "entering". */
+  body.replay .nav-icon { opacity: 0.85; pointer-events: auto; }
 
   /* ---- Pages: sketchpad + calculators carousel ---- */
   /* Sketchpad: full-screen drawing surface with a faint grid. Shown only while
@@ -857,6 +860,10 @@ let isRollingTarget = false;
 let rollTimers = []; // reel spinner intervals + stagger timeouts, so they can be cancelled
 let drawTimers = []; // number-draw spin timers, cancellable on leaving
 let currentTarget = null;
+// Intro recording (for sharing a replay) + playback state.
+let introT0 = null;        // when this game's target roll began
+let introDraws = [];       // [{i, t}] draws in order, t = ms since the roll began
+let replaying = false;     // watching a shared intro playback
 const slotValues = new Array(SLOT_COUNT).fill(null);
 const slotUsed = new Array(SLOT_COUNT).fill(false);
 let history = [];
@@ -979,6 +986,7 @@ function drawInto(i, size) {
 
   const value = bag.splice(randInt(0, bag.length - 1), 1)[0];
   slotValues[i] = value;
+  if (introT0 !== null && !replaying) introDraws.push({ i: i, t: Date.now() - introT0 });
 
   num.classList.add("spinning");
   const spin = setInterval(() => {
@@ -1710,7 +1718,7 @@ function snapBack() {
 }
 
 stageEl.addEventListener("pointerdown", (e) => {
-  if (animating) return;
+  if (animating || !document.body.classList.contains("playing")) return;
   document.body.classList.remove("del-armed"); // a new press deselects the calc
   swipeX = e.clientX; swipeY = e.clientY;       // recorded for both arm-cancel + swipe
   maybeArmDelete(e);
@@ -1859,7 +1867,11 @@ function backToHome() {
   entranceTimers = [];
   stopRoll();
   stopDraws();
-  document.body.classList.remove("playing", "won", "time-up", "entering", "raised", "on-pad");
+  pbStop();
+  replaying = false;
+  introT0 = null;
+  introDraws = [];
+  document.body.classList.remove("playing", "won", "time-up", "entering", "raised", "on-pad", "replay");
   resetArrows();
   resetCalc();
   stopTimer();
@@ -2175,6 +2187,7 @@ function sharePuzzle() {
     n: slotValues.slice(),
     s: Math.max(1, Math.round(lastOutcome.timeSec)), // opponent's bar duration
     w: history.slice(),                               // my working
+    intro: introDraws.slice(),                        // intro replay (roll + draws)
     o: {
       solved: lastOutcome.solved,
       timeSec: Math.round(lastOutcome.timeSec * 10) / 10,
@@ -2251,6 +2264,8 @@ function openMenu() {
     menuPausedElapsed = elapsedSeconds();
     stopTimer();
     borderPath.style.animationPlayState = "paused";
+  } else if (replaying) {
+    pbPause(); // freeze the shared-intro playback while the menu is open
   }
   // Submit lives here now: only on a calculator page (not the sketchpad), and it
   // submits whichever page you were on when you opened the menu.
@@ -2281,6 +2296,8 @@ function closeMenu(resume) {
     startEpoch = Date.now() - menuPausedElapsed * 1000; // resume from the frozen time
     runTimerLoop();
     borderPath.style.animationPlayState = "running";
+  } else if (resume && replaying) {
+    pbResume(); // resume the shared-intro playback
   }
   menuPausedElapsed = null;
 }
@@ -2321,6 +2338,42 @@ function loadFromURL() {
   const nums = (data.n || []).map(Number);
   if (isNaN(t) || nums.length !== SLOT_COUNT || nums.some(isNaN)) return false;
 
+  // Apply the opponent's result/banner (called after any backToHome that clears it).
+  function setShared() {
+    if (data.o) {
+      sharedGame = {
+        t: t, n: nums, s: data.s,
+        outcome: {
+          solved: !!data.o.solved,
+          timeSec: Number(data.o.timeSec) || 0,
+          score: Number(data.o.score),
+          goal: data.o.goal === undefined ? undefined : Number(data.o.goal),
+          distance: Number(data.o.distance),
+          working: data.w || [],
+        },
+      };
+      borderDurationSec = data.s && data.s > 0 ? data.s : 120;
+      beatEl.textContent = "Beat " +
+        (sharedGame.outcome.solved ? fmtTime(sharedGame.outcome.timeSec) : sharedGame.outcome.score);
+      beatEl.classList.add("show");
+    } else {
+      sharedGame = null;
+      borderDurationSec = 120;
+      beatEl.classList.remove("show");
+    }
+  }
+
+  // A recorded intro -> replay it (target roll + draws at the original rate).
+  const hasIntro = Array.isArray(data.intro) && data.intro.length === SLOT_COUNT &&
+    data.intro.every((d) => d && typeof d.i === "number" && typeof d.t === "number");
+  if (hasIntro) {
+    playIntro(t, nums, data.intro); // does backToHome, then sets up + schedules the replay
+    activeShareCode = code || null; // backToHome cleared it
+    setShared();
+    return true;
+  }
+
+  // Old links with no recorded intro: jump straight in.
   currentTarget = t;
   String(t).padStart(3, "0").split("").forEach((d, i) => {
     if (reels[i]) { reels[i].textContent = d; reels[i].className = "reel"; }
@@ -2333,33 +2386,7 @@ function loadFromURL() {
     down.disabled = true;
     slotValues[i] = nums[i];
   }
-
-  if (data.o) {
-    sharedGame = {
-      t: t,
-      n: nums,
-      s: data.s,
-      outcome: {
-        solved: !!data.o.solved,
-        timeSec: Number(data.o.timeSec) || 0,
-        score: Number(data.o.score),
-        goal: data.o.goal === undefined ? undefined : Number(data.o.goal),
-        distance: Number(data.o.distance),
-        working: data.w || [],
-      },
-    };
-    borderDurationSec = data.s && data.s > 0 ? data.s : 120;
-    beatEl.textContent = "Beat " +
-      (sharedGame.outcome.solved
-        ? fmtTime(sharedGame.outcome.timeSec)
-        : sharedGame.outcome.score);
-    beatEl.classList.add("show");
-  } else {
-    sharedGame = null;
-    borderDurationSec = 120;
-    beatEl.classList.remove("show");
-  }
-
+  setShared();
   startPlaying();
   return true;
 }
@@ -2377,6 +2404,7 @@ function goHome() {
 }
 
 function handleTargetPress() {
+  if (replaying) return; // watching a shared intro — no interaction
   if (document.body.classList.contains("playing")) {
     // v2: click the target to place its value (usable once, like a number).
     const e = available.find((x) => x.isTarget && !x.tentative);
@@ -2396,6 +2424,8 @@ function rollTarget() {
   if (isRollingTarget) return;
   backToHome();          // clean slate (also stops any prior roll)
   isRollingTarget = true;
+  introT0 = Date.now();  // start recording the intro for a shareable replay
+  introDraws = [];
 
   currentTarget = randInt(100, 999);
   const digits = String(currentTarget).split("").map(Number);
@@ -2423,6 +2453,100 @@ function rollTarget() {
       }
     }, stopDelays[i]));
   });
+}
+
+/* ---------------- Shared-game intro playback ---------------- */
+// A shared link replays the original intro — the target rolling and the six
+// numbers being drawn at the rate the sharer did — so everyone gets the same
+// time to digest the puzzle. It all runs off one pausable clock (pbTick), so
+// opening the menu freezes it.
+let pbEvents = [], pbStart = 0, pbPausedElapsed = null, pbTimer = null;
+let pbNums = [], pbTargetDigits = [];
+let pbSpinReel = [false, false, false];
+let pbSpinSlot = new Array(SLOT_COUNT).fill(false);
+
+function pbTick() {
+  if (pbPausedElapsed !== null) return;
+  const elapsed = Date.now() - pbStart;
+  for (const e of pbEvents) { if (!e.done && elapsed >= e.t) { e.done = true; try { e.fn(); } catch (_) {} } }
+  for (let i = 0; i < 3; i++) if (pbSpinReel[i]) reels[i].textContent = randInt(0, 9);
+  for (let i = 0; i < SLOT_COUNT; i++) if (pbSpinSlot[i]) slotParts(i).num.textContent = (pbNums[i] <= 10 ? randInt(1, 9) : randInt(10, 99));
+  if (pbEvents.some((e) => !e.done)) pbTimer = setTimeout(pbTick, 45);
+}
+function pbPause() {
+  if (pbPausedElapsed !== null || !pbEvents.length) return;
+  pbPausedElapsed = Date.now() - pbStart;
+  clearTimeout(pbTimer);
+}
+function pbResume() {
+  if (pbPausedElapsed === null) return;
+  pbStart = Date.now() - pbPausedElapsed;
+  pbPausedElapsed = null;
+  pbTick();
+}
+function pbStop() {
+  clearTimeout(pbTimer);
+  pbEvents = []; pbPausedElapsed = null;
+  pbSpinReel = [false, false, false];
+  pbSpinSlot = new Array(SLOT_COUNT).fill(false);
+}
+
+function playIntro(t, nums, draws) {
+  backToHome();                       // clean slate (clears replay/intro)
+  replaying = true;
+  document.body.classList.add("replay");
+  currentTarget = t;
+  introDraws = draws.slice();         // keep so a re-share replays too
+  pbNums = nums.slice();
+  pbTargetDigits = String(t).padStart(3, "0").split("").map(Number);
+  reels.forEach((r) => { r.textContent = "0"; r.className = "reel"; });
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const { up, down, num } = slotParts(i);
+    num.textContent = "00"; num.className = "slot-num"; up.disabled = true; down.disabled = true;
+  }
+  pbSpinReel = [false, false, false];
+  pbSpinSlot = new Array(SLOT_COUNT).fill(false);
+
+  const ev = [];
+  // target roll (same stagger as rollTarget)
+  ev.push({ t: 0, fn: () => { pbSpinReel = [true, true, true]; reels.forEach((r) => r.classList.add("spinning")); } });
+  [650, 1050, 1450].forEach((st, idx) => ev.push({ t: st, fn: () => {
+    pbSpinReel[idx] = false;
+    reels[idx].textContent = pbTargetDigits[idx];
+    reels[idx].classList.remove("spinning"); reels[idx].classList.add("lock");
+  } }));
+  // number draws at their recorded times
+  let maxEnd = 1450;
+  draws.forEach((d) => {
+    ev.push({ t: d.t, fn: () => { pbSpinSlot[d.i] = true; slotParts(d.i).num.classList.add("spinning"); } });
+    const end = d.t + 420;
+    maxEnd = Math.max(maxEnd, end);
+    ev.push({ t: end, fn: () => {
+      pbSpinSlot[d.i] = false;
+      const num = slotParts(d.i).num;
+      num.textContent = pbNums[d.i]; num.classList.remove("spinning"); num.classList.add("filled", "lock");
+      slotValues[d.i] = pbNums[d.i];
+    } });
+  });
+  // entrance (same beats as beginEntrance, but on the pausable clock)
+  const HOLD = 2000, RISE = 800, FADE = 500, beat = maxEnd + 450;
+  ev.push({ t: beat, fn: () => {
+    initPages(); layoutBorder(); resetBorder();
+    timerEl.textContent = "00:00";
+    document.body.classList.remove("time-up"); document.body.classList.add("entering");
+  } });
+  ev.push({ t: beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); } });
+  ev.push({ t: beat + HOLD + RISE, fn: () => { document.body.classList.add("playing"); calcEl.style.maxHeight = "80vh"; } });
+  ev.push({ t: beat + HOLD + RISE + FADE, fn: () => {
+    startTimer(); startBorderDrain(0); positionPageDel();
+    replaying = false; document.body.classList.remove("replay");
+    saveState();
+  } });
+
+  pbEvents = ev.map((e) => ({ t: e.t, fn: e.fn, done: false })).sort((a, b) => a.t - b.t);
+  pbStart = Date.now(); pbPausedElapsed = null;
+  clearTimeout(pbTimer);
+  pbTick();
 }
 
 targetEl.addEventListener("click", handleTargetPress);
