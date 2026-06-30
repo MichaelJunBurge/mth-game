@@ -1060,6 +1060,7 @@
 import { SLOT_COUNT, freshLargeBag, freshSmallBag, randInt } from "./src/core/numbers.js";
 import { evalExpression } from "./src/core/evaluate.js";
 import { computeScore as coreComputeScore, goalFor, distance as coreDistance, verdict } from "./src/core/scoring.js";
+import { buildSnapshot, normalizeSnapshot } from "./src/core/gameState.js";
 // Cross-cutting constants + the localStorage wrapper.
 import { SAVE_KEY, THEME_KEY, AUTOEQ_KEY, AUTOSIGN_KEY, LANG_KEY, MODE_KEY, TIMED_SEC, MAX_CALCS, THEME_BG } from "./src/config/constants.js";
 import { storage } from "./src/services/storage.js";
@@ -2655,24 +2656,13 @@ function saveState() {
     return;
   }
   if (pageIndex >= 1) syncActiveCalc();
-  const snapshot = {
-    phase: phase,
-    currentTarget: currentTarget,
-    slotValues: slotValues,
-    calcPages: calcPages.map((c) => Object.assign({}, c, { undoStack: [] })),
-    padStrokes: padStrokes,
-    pageIndex: pageIndex,
-    lastOutcome: lastOutcome,
-    sharedGame: sharedGame,
-    practiceGame: practiceGame,
-    borderDurationSec: borderDurationSec,
-    startEpoch: startEpoch,
-    largeBag: largeBag,
-    smallBag: smallBag,
-    shareCode: activeShareCode,
-    introDraws: introDraws,   // so the shareable intro survives a page reload
-  };
-  storage.setJSON(SAVE_KEY, snapshot);
+  // The serializable shape lives in core/gameState.js (introDraws is included so
+  // the shareable intro survives a page reload).
+  storage.setJSON(SAVE_KEY, buildSnapshot({
+    phase, currentTarget, slotValues, calcPages, padStrokes, pageIndex,
+    lastOutcome, sharedGame, practiceGame, borderDurationSec, startEpoch,
+    largeBag, smallBag, shareCode: activeShareCode, introDraws,
+  }));
 }
 
 function readSave() {
@@ -2684,8 +2674,10 @@ function clearSave() {
 }
 
 // Rebuild a saved game so a refresh lands back where you were.
-function restoreState(s) {
-  if (!s || s.currentTarget == null) return false;
+function restoreState(raw) {
+  // Parse/validate off the DOM (core/gameState.js); this function applies it.
+  const s = normalizeSnapshot(raw);
+  if (!s) return false;
 
   currentTarget = s.currentTarget;
   String(currentTarget).padStart(3, "0").split("").forEach((d, i) => {
@@ -2694,7 +2686,7 @@ function restoreState(s) {
 
   for (let i = 0; i < SLOT_COUNT; i++) {
     const { up, down, num } = slotParts(i);
-    if (s.slotValues && s.slotValues[i] != null) {
+    if (s.slotValues[i] != null) {
       slotValues[i] = s.slotValues[i];
       num.textContent = s.slotValues[i];
       num.className = "slot-num filled"; // 'used' is applied per active calc below
@@ -2708,29 +2700,22 @@ function restoreState(s) {
     slotUsed[i] = false;
   }
 
-  if (s.largeBag) largeBag = s.largeBag.slice();
-  if (s.smallBag) smallBag = s.smallBag.slice();
-  // Restore the intro recording so a share made after a reload still replays the
-  // roll + draws. Re-base introT0 to the last recorded draw so any numbers drawn
-  // after the reload continue smoothly (no giant gap from the time away).
-  introDraws = Array.isArray(s.introDraws) ? s.introDraws.map((d) => ({ i: d.i, t: d.t })) : [];
+  if (s.largeBag) largeBag = s.largeBag;
+  if (s.smallBag) smallBag = s.smallBag;
+  // Re-base introT0 to the last recorded draw so any numbers drawn after the
+  // reload continue smoothly (no giant gap from the time away).
+  introDraws = s.introDraws;
   introT0 = Date.now() - introDraws.reduce((m, d) => Math.max(m, d.t || 0), 0);
-  lastOutcome = s.lastOutcome || null;
-  sharedGame = s.sharedGame || null;
-  practiceGame = !!s.practiceGame && !sharedGame;
+  lastOutcome = s.lastOutcome;
+  sharedGame = s.sharedGame;
+  practiceGame = s.practiceGame && !sharedGame;
   borderDurationSec = TIMED_SEC; // fixed 2:00 for everyone now
   startEpoch = s.startEpoch || Date.now();
-  activeShareCode = s.shareCode || null;
+  activeShareCode = s.shareCode;
 
-  // Pages: rebuild the calculators + sketchpad and load the active one.
-  calcPages = (s.calcPages || []).map((c) => ({
-    expr: c.expr || "", lineSum: c.lineSum == null ? null : c.lineSum, hasLineEntry: !!c.hasLineEntry,
-    available: (c.available || []).map((e) => ({ value: e.value, slotIndex: e.slotIndex, isTarget: e.isTarget, tentative: !!e.tentative })),
-    slotUsed: (c.slotUsed || []).slice(), history: (c.history || []).slice(),
-    undoStack: [], lastResult: c.lastResult == null ? null : c.lastResult, tapeOpen: !!c.tapeOpen,
-  }));
-  padStrokes = Array.isArray(s.padStrokes) ? s.padStrokes : [];
-  pageIndex = s.pageIndex == null ? 1 : s.pageIndex;
+  calcPages = s.calcPages;        // already normalized (undo stacks dropped)
+  padStrokes = s.padStrokes;
+  pageIndex = s.pageIndex;
   sizeSketch();
 
   if (calcPages.length === 0) {
