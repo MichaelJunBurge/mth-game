@@ -318,7 +318,6 @@
   }
   .pad-undo svg { width: calc(var(--size-ui) * 1.5); height: calc(var(--size-ui) * 1.5); display: block; }
   body.on-pad .pad-undo { display: block; }
-  body.on-pad .pager-arrow.left { display: none; } /* the undo icon takes its place */
   body.won .pad-undo { display: none; }
   .pad-undo:hover { opacity: 0.7; }
   .pad-undo:active { transform: translateY(-50%) scale(0.9); }
@@ -342,33 +341,6 @@
     display: none;
   }
   body.playing.all-used:not(.on-pad):not(.del-armed):not(.won):not(.menu-open) .submit { display: block; }
-
-  /* Side arrows. Shown on pointer/wide screens, and always on the sketchpad
-     (there, the surface is for drawing so you can't swipe to leave). */
-  .pager-arrow {
-    position: fixed;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 43;
-    background: none;
-    border: none;
-    color: var(--ink);
-    opacity: 0.18;
-    cursor: pointer;
-    padding: 0.8em;
-    display: none;
-  }
-  .pager-arrow svg { width: calc(var(--size-ui) * 1.4); height: calc(var(--size-ui) * 1.4); display: block; }
-  /* Same gap from the side as the timer has from the top (5dvh), less the button
-     padding so the arrow glyph itself lands at that distance. */
-  .pager-arrow.left { left: calc(5dvh - 0.8em + env(safe-area-inset-left, 0px)); }
-  .pager-arrow.right { right: calc(5dvh - 0.8em + env(safe-area-inset-right, 0px)); }
-  .pager-arrow:hover { opacity: 0.6; }
-  .pager-arrow:disabled { opacity: 0.05; cursor: default; }
-  @media (hover: hover) and (min-width: 720px) {
-    body.playing .pager-arrow { display: block; }
-  }
-  body.on-pad .pager-arrow { display: block; } /* always navigable off the pad */
 
   /* Page-change slide-in (directional). */
   @keyframes pageInR { from { transform: translateX(28px); opacity: 0.25; } to { transform: none; opacity: 1; } }
@@ -959,12 +931,6 @@
       <polyline points="1 4 1 10 7 10" />
       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
     </svg>
-  </button>
-  <button id="nav-left" class="pager-arrow left" aria-label="Previous page">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5 L8 12 L15 19" /></svg>
-  </button>
-  <button id="nav-right" class="pager-arrow right" aria-label="Next page">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 L16 12 L9 19" /></svg>
   </button>
 
   <main class="stage">
@@ -1814,11 +1780,6 @@ function renderDots() {
     add.addEventListener("click", addCalcPage);
     dotsEl.appendChild(add);
   }
-  // Left arrow only past the pad; right arrow always (it can add a calculator).
-  const nl = document.getElementById("nav-left");
-  const nr = document.getElementById("nav-right");
-  if (nl) nl.disabled = pageIndex === 0;
-  if (nr) nr.disabled = pageIndex >= 1 && calcPages.length >= MAX_CALCS && pageIndex === pageCount() - 1;
   positionPageDel();
 }
 
@@ -2070,7 +2031,7 @@ sketchEl.addEventListener("pointercancel", endPadStroke);
    the new one slides in from the other side. Reversed/natural: drag RIGHT goes
    to the page on the LEFT, drag LEFT goes to the page on the right. */
 const calcwrapEl = document.querySelector(".calcwrap");
-let swipeX = 0, swipeY = 0, swipeT0 = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null, homeSwiping = false, lastPointerType = "";
+let swipeX = 0, swipeY = 0, swipeT0 = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null, homeSwiping = false, lastPointerType = "", gestureMoved = false;
 let longPressTimer = null;
 let vDir = 0; // vertical-swipe direction once the axis locks: +1 = help (up), -1 = menu (down)
 // A sheet opens if dragged far enough OR flicked fast enough over a short distance.
@@ -2201,16 +2162,27 @@ stageEl.addEventListener("pointerdown", (e) => {
   }
   swipeX = e.clientX; swipeY = e.clientY; swipeT0 = Date.now();
   lastPointerType = e.pointerType;
-  if (e.pointerType === "mouse") return; // mouse: arms only; arrows for nav
+  gestureMoved = false; // a tap (no move) -> click navigates; a drag -> swipe handles it
+  if (e.pointerType === "mouse") return; // mouse: arms only; taps/clicks navigate
   swiping = true; swipeHoriz = false; swipeDone = false; swipeAxis = null; homeSwiping = false;
   if (playing) { calcwrapEl.classList.remove("snapback"); calcwrapEl.classList.add("dragging"); }
 });
-// Desktop: clicking the empty left/right half of the home screen flips the mode,
-// the same as a swipe does on mobile (mobile taps don't, only swipes).
+// Tap/click a side to slide — the same as a swipe, on mouse AND touch. On home
+// it flips the mode (either half); during play it turns the page, but only in the
+// margins OUTSIDE the calculator column (the centre stays free for the tape and
+// the keypad). A drag is a swipe (gestureMoved), so it doesn't also navigate.
 stageEl.addEventListener("click", (e) => {
-  if (lastPointerType !== "mouse" || animating || !canHomeModeSwipe()) return;
-  if (e.target.closest("#target, .arrow, .nav-icon, .pager-arrow, .pad-undo, #timer, button")) return;
-  commitModeSwipe(e.clientX < window.innerWidth / 2 ? 1 : -1); // left half slides like a right-swipe
+  if (animating || tourOrOverlayOpen() || gestureMoved) return;
+  if (document.body.classList.contains("tape-open")) return; // a tap then closes the tape (handled below)
+  if (e.target.closest("#target, .arrow, .nav-icon, #timer, .dot, .dot-add, .page-del, .key, .gen-chip, button")) return;
+  if (document.body.classList.contains("playing")) {
+    if (pageIndex === 0) return; // the sketchpad's own handlers own its taps (left=undo, right=next)
+    const r = calcEl.getBoundingClientRect();
+    if (e.clientX < r.left) pageLeft();
+    else if (e.clientX > r.right) pageRight();
+  } else if (canHomeModeSwipe()) {
+    commitModeSwipe(e.clientX < window.innerWidth / 2 ? 1 : -1); // left half slides like a right-swipe
+  }
 });
 stageEl.addEventListener("pointermove", (e) => {
   if (longPressTimer && (Math.abs(e.clientX - swipeX) > 10 || Math.abs(e.clientY - swipeY) > 10)) cancelLongPress();
@@ -2220,6 +2192,7 @@ stageEl.addEventListener("pointermove", (e) => {
   if (!swipeAxis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
     swipeAxis = Math.abs(dx) >= Math.abs(dy) ? "h" : "v";
     if (swipeAxis === "v") vDir = dy < 0 ? 1 : -1; // up -> help, down -> menu
+    gestureMoved = true; // it's a drag/swipe, so the trailing click shouldn't navigate
     cancelLongPress();
   }
   if (swipeAxis === "h" && document.body.classList.contains("playing")) {
@@ -2254,8 +2227,6 @@ function endSwipe(e) {
 }
 stageEl.addEventListener("pointerup", endSwipe);
 stageEl.addEventListener("pointercancel", endSwipe);
-document.getElementById("nav-left").addEventListener("click", pageLeft);
-document.getElementById("nav-right").addEventListener("click", pageRight);
 document.getElementById("page-del").addEventListener("click", deleteCurrentPage);
 
 // Sketchpad undo icon: tap undoes the last stroke, hold keeps undoing (faster).
