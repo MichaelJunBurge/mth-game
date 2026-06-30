@@ -1053,23 +1053,15 @@
     </div>
   </div>
 
-<script>
+<script type="module">
 "use strict";
 
+// Pure, DOM-free game logic lives in src/core/* (unit-tested with `node --test`).
+import { SLOT_COUNT, freshLargeBag, freshSmallBag, randInt } from "./src/core/numbers.js";
+import { evalExpression } from "./src/core/evaluate.js";
+import { computeScore as coreComputeScore, goalFor, distance as coreDistance, verdict } from "./src/core/scoring.js";
+
 /* ---------------- Number pools ---------------- */
-const SLOT_COUNT = 6;
-function freshLargeBag() {
-  // Multiples of five from 20 up to 100, one of each (no duplicates).
-  const bag = [];
-  for (let n = 20; n <= 100; n += 5) bag.push(n);
-  return bag;
-}
-function freshSmallBag() {
-  // One of each 1..10 — no duplicates, so the six numbers are always distinct.
-  const bag = [];
-  for (let n = 1; n <= 10; n++) bag.push(n);
-  return bag;
-}
 let largeBag = freshLargeBag();
 let smallBag = freshSmallBag();
 
@@ -1146,10 +1138,6 @@ function setMode(m) {
   gameMode = m === "practice" ? "practice" : "timed";
   try { localStorage.setItem(MODE_KEY, gameMode); } catch (e) {}
   refreshHomeTimer();
-}
-
-function randInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 /* ---------------- Chevron arrows (identical up/down) ---------------- */
@@ -1689,30 +1677,15 @@ function handleEquals() {
 }
 
 function evaluate() {
-  if (expr === "") return;
-  if (!/^[0-9+\-x÷^√().\s]*$/.test(expr)) return showError();
+  // Pure numeric evaluation in core/evaluate.js; this keeps the DOM/state side
+  // effects. `closed` reflects any auto-closed brackets — sync the display to it.
+  const r = evalExpression(expr);
+  if (r.status === "empty") return;
+  if (r.closed != null && r.closed !== expr) { expr = r.closed; renderDisplay(); }
+  if (r.status === "invalid") return showError();
+  if (r.status === "fraction") return decimalError(); // no fractions (= and auto-= alike)
 
-  // Forgot to close a bracket before =? Auto-close any that are still open.
-  const unclosed = (expr.match(/\(/g) || []).length - (expr.match(/\)/g) || []).length;
-  if (unclosed > 0) { expr += ")".repeat(unclosed); renderDisplay(); }
-
-  const js = expr
-    .replace(/√/g, "Math.sqrt")
-    .replace(/x/g, "*")
-    .replace(/÷/g, "/")
-    .replace(/\^/g, "**");
-
-  let value;
-  try {
-    value = Function('"use strict"; return (' + js + ");")();
-  } catch (e) {
-    return showError();
-  }
-  if (typeof value !== "number" || !isFinite(value)) return showError();
-
-  const rounded = Math.round(value * 1e6) / 1e6;
-  // No fractions allowed: a non-whole result is an error (= and auto-= alike).
-  if (!Number.isInteger(rounded)) return decimalError();
+  const rounded = r.value;
 
   // The operands are exactly: the running result (if we continued from one)
   // plus every number tentatively placed in this equation.
@@ -2491,14 +2464,9 @@ function elapsedSeconds() {
 }
 
 // Score when you don't cleanly solve: the value you reached plus the sum of any
-// numbers you never used. Closer to the target is better.
+// numbers you never used. Closer to the target is better. (Pure math in core.)
 function computeScore() {
-  const reached = lastResult === null ? 0 : lastResult;
-  let unusedSum = 0;
-  for (let i = 0; i < SLOT_COUNT; i++) {
-    if (!slotUsed[i] && slotValues[i] !== null) unusedSum += slotValues[i];
-  }
-  return reached + unusedSum;
+  return coreComputeScore({ reached: lastResult, slotUsed, slotValues });
 }
 
 // Make sure a freshly evaluated answer is captured in the tape before we freeze
@@ -2515,8 +2483,7 @@ function flushAnswerToTape() {
 // The goal a submission is judged against: 0 if the target was folded into the
 // working (winding backwards to zero), otherwise the target itself.
 function currentGoal() {
-  const targetUsed = !available.some((e) => e.isTarget);
-  return targetUsed ? 0 : currentTarget;
+  return goalFor({ targetUsed: !available.some((e) => e.isTarget), target: currentTarget });
 }
 
 function finishSolved() {
@@ -2536,7 +2503,7 @@ function finishSubmitted() {
     timeSec: elapsedSeconds(),
     score: score,
     goal: goal,
-    distance: Math.abs(score - goal),
+    distance: coreDistance(score, goal),
   };
   endGame();
 }
@@ -2551,17 +2518,7 @@ function goalOf(o) {
   return o && o.goal !== undefined && o.goal !== null ? o.goal : currentTarget;
 }
 
-// Compare my result to the opponent's: closer to target wins; ties broken by a
-// clean solve, then by faster time.
-function verdict(me, them) {
-  // Closer to the target wins. If the same number was reached, the faster
-  // player wins. Only a dead heat on both is a tie.
-  if (me.distance !== them.distance) return me.distance < them.distance ? "win" : "lose";
-  if (Math.round(me.timeSec) !== Math.round(them.timeSec)) {
-    return me.timeSec < them.timeSec ? "win" : "lose";
-  }
-  return "tie";
-}
+// (verdict() — closer-to-goal-wins comparison — now imported from src/core/scoring.js)
 
 function endGame() {
   stopTimer();
@@ -3669,6 +3626,26 @@ refreshHomeTimer(); // show 02:00 on the home screen in timed mode
   if (urlG && saved && urlG !== saved.shareCode) clearSave();
   loadFromURL();
 })();
+
+// Dev-only test bridge: lets the local preview harness drive the game now that
+// the code is an ES module (functions are no longer global). Guarded to
+// localhost, so it is completely inert on the deployed site.
+if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+  window.__t = {
+    backToHome, setMode, startPlaying, playNumber, pressKey, applyAutoEqual, handleEquals,
+    finishSubmitted, finishSolved, evaluate,
+    setup(target, vals) {
+      backToHome(); currentTarget = target;
+      vals.forEach((v, i) => { slotValues[i] = v; const p = slotParts(i); p.num.textContent = v; p.num.className = "slot-num filled"; });
+      practiceGame = false; startPlaying();
+    },
+    play(idx) { playNumber(available.find((e) => e.slotIndex === idx && !e.tentative)); },
+    state() {
+      return { expr, lineSum, lastResult, display: displayValEl.textContent, displayCls: displayEl.className,
+        outcome: lastOutcome, slotUsed: slotUsed.slice(), currentTarget };
+    },
+  };
+}
 </script>
 </body>
 </html>
