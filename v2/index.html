@@ -748,22 +748,6 @@
     will-change: transform;
   }
   body.menu-open .menu { transform: translateY(0); }
-  .menu-x {
-    position: absolute;
-    top: 4vh;
-    right: 6vw;
-    background: none;
-    border: none;
-    font-family: var(--font);
-    font-size: calc(var(--size-ui) * 1.6);
-    font-weight: 700;
-    line-height: 1;
-    color: var(--ink);
-    cursor: pointer;
-    padding: 0.1em 0.3em;
-    transition: transform 0.08s;
-  }
-  .menu-x:hover { transform: scale(1.12); }
   .menu-view {
     display: none;
     flex-direction: column;
@@ -835,9 +819,10 @@
     will-change: transform;
   }
   body.guide-open #guide { transform: translateY(0); }
-  #guide:not(.rules-open):not(.overview-open) .guide-choice { display: flex; }
+  #guide:not(.rules-open):not(.overview-open):not(.profile-open) .guide-choice { display: flex; }
   #guide.rules-open .guide-rules-view { display: flex; }
   #guide.overview-open .guide-overview-view { display: flex; }
+  #guide.profile-open .guide-profile-view { display: flex; }
 
   /* Walkthrough coach-mark: a spotlight + arrow + note pointing at the live UI. */
   /* pointer-events:auto so the dimmed area blocks the live UI during the tour. */
@@ -996,7 +981,6 @@
   <div id="toast" class="toast"></div>
 
   <div id="menu" class="menu">
-    <button id="menu-close" class="menu-x" aria-label="Close menu">&times;</button>
     <div class="menu-view menu-main">
       <button id="menu-submit" class="menu-btn">Quit</button>
       <button id="menu-resume" class="menu-btn" data-i18n="menu.resume">Resume</button>
@@ -1010,13 +994,17 @@
     </div>
   </div>
 
-  <!-- Help (question-mark) overlay: Walkthrough or Rules. -->
+  <!-- Help (question-mark) overlay: Profile / Overview / Rules / Walkthrough. -->
   <div id="guide" class="sheet">
-    <button id="guide-close" class="menu-x" aria-label="Close">&times;</button>
     <div class="menu-view guide-choice">
+      <button id="guide-profile" class="menu-btn" data-i18n="guide.profile">Profile</button>
       <button id="guide-overview" class="menu-btn" data-i18n="guide.overview">Overview</button>
       <button id="guide-rules" class="menu-btn" data-i18n="guide.rules">Rules</button>
       <button id="guide-walk" class="menu-btn" data-i18n="guide.walk">Walkthrough</button>
+    </div>
+    <div class="menu-view guide-profile-view">
+      <div class="help-text" id="guide-profile-text" data-i18n="profile.soon">Profiles &amp; leaderboards are coming soon.</div>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <div class="menu-view guide-rules-view">
       <div class="help-text" id="guide-rules-text"></div>
@@ -2198,13 +2186,13 @@ stageEl.addEventListener("pointerdown", (e) => {
 // the keypad). A drag is a swipe (gestureMoved), so it doesn't also navigate.
 stageEl.addEventListener("click", (e) => {
   if (animating || tourOrOverlayOpen() || gestureMoved) return;
-  if (document.body.classList.contains("tape-open")) return; // a tap then closes the tape (handled below)
-  if (e.target.closest("#target, .arrow, .nav-icon, #timer, .dot, .dot-add, .page-del, .key, .gen-chip, button")) return;
+  if (e.target.closest("#target, .arrow, .nav-icon, #timer, .dot, .dot-add, .page-del, .key, .gen-chip, .history-wrap, button")) return;
   if (document.body.classList.contains("playing")) {
     if (pageIndex === 0) return; // the sketchpad's own handlers own its taps (left=undo, right=next)
     const r = calcEl.getBoundingClientRect();
-    if (e.clientX < r.left) pageLeft();
+    if (e.clientX < r.left) pageLeft();          // sides navigate — even with the tape expanded
     else if (e.clientX > r.right) pageRight();
+    else if (document.body.classList.contains("tape-open")) collapseTape(); // centre tap closes the tape
   } else if (canHomeModeSwipe()) {
     commitModeSwipe(e.clientX < window.innerWidth / 2 ? 1 : -1); // left half slides like a right-swipe
   }
@@ -3012,7 +3000,6 @@ function restartShared() {
 timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-help").addEventListener("click", openGuide);
-document.getElementById("menu-close").addEventListener("click", () => closeMenu(true));
 document.getElementById("menu-lang").addEventListener("click", toggleLang);
 
 // Drag-to-close on the overlays: the open sheet follows the finger back toward
@@ -3067,14 +3054,17 @@ function openGuide() {
 }
 function closeGuide() {
   document.body.classList.remove("guide-open");
-  guideEl.classList.remove("rules-open", "overview-open");
+  guideEl.classList.remove("rules-open", "overview-open", "profile-open");
   resumeFromOverlay();
 }
-document.getElementById("guide-close").addEventListener("click", closeGuide);
+document.getElementById("guide-profile").addEventListener("click", () => guideEl.classList.add("profile-open"));
 document.getElementById("guide-rules").addEventListener("click", () => guideEl.classList.add("rules-open"));
 document.getElementById("guide-overview").addEventListener("click", () => guideEl.classList.add("overview-open"));
-document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => guideEl.classList.remove("rules-open", "overview-open")));
+document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => guideEl.classList.remove("rules-open", "overview-open", "profile-open")));
 document.getElementById("guide-walk").addEventListener("click", () => { closeGuide(); startTour(); });
+// Tap the empty area of either overlay (not a button/control) to close it.
+menuEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, #menu-scale, button, input")) closeMenu(true); });
+guideEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, button")) closeGuide(); });
 
 // The walkthrough drives a quick demo and points a spotlight + note at each part.
 const TOUR_STEPS = [
@@ -3473,12 +3463,8 @@ historyWrapEl.addEventListener("click", () => {
   if (historyWrapEl.classList.contains("expanded")) collapseTape();
   else expandTape();
 });
-// When the tape is expanded, a tap on any non-button area closes it (easy exit).
-stageEl.addEventListener("click", (e) => {
-  if (!document.body.classList.contains("tape-open")) return;
-  if (e.target.closest(".history-wrap, .key, .gen-chip, .slot, .reel, #target, .nav-icon, .dot, .dot-add, .page-del, button")) return;
-  collapseTape();
-});
+// (A centre tap when the tape is open collapses it — handled in the nav click
+// above — while side taps still navigate.)
 
 buildSlots();
 buildKeys();
