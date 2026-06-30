@@ -1311,6 +1311,12 @@ let calcPages = [];        // per-calculator state snapshots
 let padStrokes = [];       // sketchpad strokes; each is an array of {x,y} in 0..1
 let pageIndex = 1;
 
+// Short haptic tick on a button press. Uses the Vibration API — works on Android
+// Chrome; iOS Safari has no web haptics, so it's a silent no-op there.
+function haptic() {
+  if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
+}
+
 function buildKeys() {
   keysEl.innerHTML = "";
   KEYS.forEach((label) => {
@@ -1438,6 +1444,7 @@ function restoreSnapshot(s) {
 }
 function undo() {
   if (undoStack.length === 0) return;
+  haptic(); // the clear (c) key — tap or hold-repeat
   restoreSnapshot(undoStack.pop());
   saveState();
 }
@@ -1447,6 +1454,7 @@ function undo() {
 // auto-sign; with auto-equal on, a completed single operation evaluates.
 function playNumber(entry) {
   if (!entry || entry.tentative || entry === lineEntry) return;
+  haptic(); // a six-number slot, a result chip, or the target placed onto the line
   document.body.classList.remove("del-armed"); // using the calc deselects the x
   pushUndo();
   if (!expectingValue()) {                             // auto-sign between numbers
@@ -1489,6 +1497,7 @@ function renderDisplay() {
 }
 
 function pressKey(label) {
+  haptic();
   document.body.classList.remove("del-armed"); // using the calc deselects the x
   // The clear key is handled separately (multi-click) and never reaches here.
   if (label === "=") { pushUndo(); handleEquals(); return; }
@@ -3185,6 +3194,7 @@ function stopRoll() {
 
 function rollTarget() {
   if (isRollingTarget) return;
+  haptic();              // tapping the target to roll it
   backToHome();          // clean slate (also stops any prior roll)
   isRollingTarget = true;
   introT0 = Date.now();  // start recording the intro for a shareable replay
