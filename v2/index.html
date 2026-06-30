@@ -23,6 +23,9 @@
     --green: #1ec96f;
     --red: #e8503a;
     --font: "Roboto Mono", ui-monospace, "Courier New", monospace;
+    /* Sheet motion: ramps up, then eases off gradually the last stretch (springy). */
+    --ease-spring: cubic-bezier(0.5, 0, 0.2, 1);
+    --dur-sheet: 0.42s;
 
     /* One width drives the column AND every text size, so they scale together
        and stop growing once the column is capped. */
@@ -253,13 +256,13 @@
   body.on-pad .page-del { display: none; }             /* pad uses the undo button */
   .page-del:hover { opacity: 0.7; }
 
-  /* Sketchpad undo (tap = undo last stroke, hold = clear). Sits above the dots,
-     the same distance from them as they are from the bottom (set in JS). */
+  /* Sketchpad undo (tap = undo last stroke, hold = keep undoing). Sits at the
+     centre-left, mirroring the page arrow on the right. */
   .pad-undo {
     position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: calc(10dvh + env(safe-area-inset-bottom, 0px));
+    top: 50%;
+    left: calc(5dvh - 0.4em + env(safe-area-inset-left, 0px));
+    transform: translateY(-50%);
     z-index: 43;
     background: none;
     border: none;
@@ -271,9 +274,10 @@
   }
   .pad-undo svg { width: calc(var(--size-ui) * 1.5); height: calc(var(--size-ui) * 1.5); display: block; }
   body.on-pad .pad-undo { display: block; }
+  body.on-pad .pager-arrow.left { display: none; } /* the undo icon takes its place */
   body.won .pad-undo { display: none; }
   .pad-undo:hover { opacity: 0.7; }
-  .pad-undo:active { transform: translateX(-50%) scale(0.9); }
+  .pad-undo:active { transform: translateY(-50%) scale(0.9); }
 
   /* On-screen Submit — appears (green) between the calculator and the dots once
      every number is used. Top is set in JS to the same midpoint as the x. */
@@ -717,7 +721,7 @@
     justify-content: center;
     gap: 4vh;
     transform: translateY(-100%);
-    transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+    transition: transform var(--dur-sheet) var(--ease-spring);
     will-change: transform;
   }
   body.menu-open .menu { transform: translateY(0); }
@@ -759,6 +763,7 @@
   .menu-btn:hover { transform: scale(1.12); }
   /* Submit goes green once all six numbers are used (a "you can stop" cue). */
   .menu-btn.ready { color: var(--green); }
+  .guide-back { color: var(--red); } /* the Back text buttons in the help views */
 
   /* Help (?) overlay — a bottom sheet that slides UP over the stationary game. */
   .sheet {
@@ -772,7 +777,7 @@
     justify-content: center;
     gap: 4vh;
     transform: translateY(100%);
-    transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+    transition: transform var(--dur-sheet) var(--ease-spring);
     will-change: transform;
   }
   body.guide-open #guide { transform: translateY(0); }
@@ -887,7 +892,7 @@
   <!-- Page nav: dots (one per page), delete-current, and desktop side arrows. -->
   <div id="dots" class="dots"></div>
   <button id="page-del" class="page-del" aria-label="Delete this page">&times;</button>
-  <button id="pad-undo" class="pad-undo" aria-label="Undo last stroke (hold to clear)">
+  <button id="pad-undo" class="pad-undo" aria-label="Undo last stroke (hold to keep undoing)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <polyline points="1 4 1 10 7 10" />
       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
@@ -1699,17 +1704,6 @@ function positionPageDel() {
   }
   del.style.top = Math.round(mid) + "px";
   submitEl.style.top = Math.round(mid) + "px"; // submit shares the x's midpoint
-  positionPadUndo();
-}
-// Sketchpad undo button: the GLYPH's gap to the dots equals the dots' gap to the
-// bottom (so account for the button's own bottom padding).
-function positionPadUndo() {
-  const undo = document.getElementById("pad-undo");
-  const r = dotsEl.getBoundingClientRect();
-  if (!r.height) return;
-  const gap = window.innerHeight - r.bottom;            // dots -> bottom
-  const padB = parseFloat(getComputedStyle(undo).paddingBottom) || 0;
-  undo.style.bottom = Math.round(window.innerHeight - r.top + gap - padB) + "px";
 }
 
 // Switch pages WITHOUT animation (the state change). Returns true if it moved.
@@ -1741,12 +1735,28 @@ function gotoPage(idx) {
   if (gotoPageCore(idx)) animatePage(goingRight);
 }
 
-// Append a blank calculator and move to it (core = no animation).
+// A calculator page with no work on it at all (nothing to lose by dropping it).
+function isBlankCalc(snap) {
+  return !!snap && (snap.history || []).length === 0 && !snap.expr &&
+         snap.lastResult == null && !(snap.slotUsed || []).some(Boolean);
+}
+// Append a blank calculator and move to it (core = no animation). If the page we
+// leave is itself blank, drop it so empty pages never pile up — the swipe still
+// reads as "opening a new page" but the count stays put.
 function addCalcPageCore() {
   if (calcPages.length >= MAX_CALCS) return gotoPageCore(pageCount() - 1);
+  const leftBlank = pageIndex >= 1 && isBlankCalc(snapshotCalc(false));
   if (pageIndex >= 1) syncActiveCalc();
   calcPages.push(blankCalc());
-  return gotoPageCore(calcPages.length);
+  const moved = gotoPageCore(calcPages.length);
+  if (leftBlank) {
+    calcPages.splice(pageIndex - 2, 1); // remove the blank page we just left
+    pageIndex -= 1;                      // everything after it shifted left by one
+    renderDots();
+    positionPageDel();
+    saveState();
+  }
+  return moved;
 }
 function addCalcPage() {
   const before = pageIndex;
@@ -1831,6 +1841,31 @@ function padSegment() {
   sketchCtx.lineTo(b.x * w, b.y * h);
   sketchCtx.stroke();
 }
+// ---- Shared sketchpad undo (the centre-left icon AND a tap/hold on the left) ----
+function padUndoOnce() {
+  if (!padStrokes.length) return false;
+  padStrokes.pop();
+  redrawSketch();
+  return true;
+}
+let padUndoHoldTimer = null, padUndoHoldDelay = 0, padUndoHolding = false;
+function padUndoHoldStart() {           // keep undoing, accelerating, until released
+  padUndoHolding = true;
+  padUndoHoldDelay = 260;
+  const step = () => {
+    if (!padUndoOnce()) { padUndoHoldStop(); return; }
+    padUndoHoldDelay = Math.max(55, padUndoHoldDelay * 0.8);
+    padUndoHoldTimer = setTimeout(step, padUndoHoldDelay);
+  };
+  step();                              // undo one right away, then speed up
+}
+function padUndoHoldStop() {
+  if (padUndoHoldTimer) { clearTimeout(padUndoHoldTimer); padUndoHoldTimer = null; }
+  if (padUndoHolding) { padUndoHolding = false; saveState(); }
+}
+
+let padUndoZone = false, padZoneHoldTimer = null, padZoneHeld = false;
+function clearPadZoneHold() { if (padZoneHoldTimer) { clearTimeout(padZoneHoldTimer); padZoneHoldTimer = null; } }
 sketchEl.addEventListener("pointerdown", (e) => {
   if (pageIndex !== 0) return;
   e.preventDefault();
@@ -1841,20 +1876,44 @@ sketchEl.addEventListener("pointerdown", (e) => {
   padPoint(e);
   redrawSketch();
   try { sketchEl.setPointerCapture(e.pointerId); } catch (_) {}
+  // Left side = undo zone: a still press undoes; holding keeps undoing (faster).
+  padUndoZone = e.clientX < window.innerWidth * 0.5;
+  padZoneHeld = false;
+  if (padUndoZone) {
+    padZoneHoldTimer = setTimeout(() => {
+      padZoneHoldTimer = null;
+      if (padStrokes[padStrokes.length - 1] === padStroke) padStrokes.pop(); // drop the tentative dot
+      padStroke = null; drawingPad = false; padZoneHeld = true;
+      redrawSketch();
+      padUndoHoldStart();
+    }, 300);
+  }
 });
 sketchEl.addEventListener("pointermove", (e) => {
   if (!drawingPad) return;
+  if (padZoneHoldTimer && Math.hypot(e.clientX - padDownX, e.clientY - padDownY) > 10) {
+    clearPadZoneHold(); padUndoZone = false; // it's a drawing stroke, not an undo
+  }
   padPoint(e);
   padSegment();
 });
 function endPadStroke(e) {
+  clearPadZoneHold();
+  if (padZoneHeld) { padZoneHeld = false; padUndoHoldStop(); return; } // continuous undo finished
   if (!drawingPad) return;
   drawingPad = false;
-  // A quick tap on the right edge (you can't swipe on the pad) jumps to the
-  // calculator on the right.
   const moved = e ? Math.hypot(e.clientX - padDownX, e.clientY - padDownY) : 99;
-  if (e && moved < 12 && Date.now() - padDownT < 350 && padDownX > window.innerWidth * 0.72) {
-    padStrokes.pop();      // drop the stray dot
+  const quick = e && moved < 12 && Date.now() - padDownT < 350;
+  // Quick tap on the LEFT side undoes the previous stroke.
+  if (quick && padUndoZone) {
+    if (padStrokes[padStrokes.length - 1] === padStroke) padStrokes.pop(); // drop the stray dot
+    padStroke = null;
+    if (padUndoOnce()) saveState(); else redrawSketch();
+    return;
+  }
+  // Quick tap on the right edge jumps to the calculator on the right.
+  if (quick && padDownX > window.innerWidth * 0.72) {
+    padStrokes.pop();
     redrawSketch();
     padStroke = null;
     pageRight();
@@ -1872,9 +1931,14 @@ sketchEl.addEventListener("pointercancel", endPadStroke);
    the new one slides in from the other side. Reversed/natural: drag RIGHT goes
    to the page on the LEFT, drag LEFT goes to the page on the right. */
 const calcwrapEl = document.querySelector(".calcwrap");
-let swipeX = 0, swipeY = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null;
+let swipeX = 0, swipeY = 0, swipeT0 = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null;
 let longPressTimer = null;
 let vDir = 0; // vertical-swipe direction once the axis locks: +1 = help (up), -1 = menu (down)
+// A sheet opens if dragged far enough OR flicked fast enough over a short distance.
+function sheetShouldOpen(progress, distPx, dt) {
+  const speed = Math.abs(distPx) / Math.max(1, dt); // px per ms
+  return progress > 0.25 || (progress > 0.07 && speed > 0.45);
+}
 
 function setDrag(px) { calcwrapEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
 function commitDist() { return Math.min(130, window.innerWidth * 0.26); }
@@ -1963,7 +2027,7 @@ stageEl.addEventListener("pointerdown", (e) => {
     document.body.classList.remove("del-armed"); // a new press deselects the calc
     maybeArmDelete(e);
   }
-  swipeX = e.clientX; swipeY = e.clientY;
+  swipeX = e.clientX; swipeY = e.clientY; swipeT0 = Date.now();
   if (e.pointerType === "mouse") return; // mouse: arms only; arrows for nav
   swiping = true; swipeHoriz = false; swipeDone = false; swipeAxis = null;
   if (playing) { calcwrapEl.classList.remove("snapback"); calcwrapEl.classList.add("dragging"); }
@@ -1995,8 +2059,9 @@ function endSwipe(e) {
   const dx = e.clientX - swipeX, dy = e.clientY - swipeY;
   if (swipeAxis === "v") {
     calcwrapEl.classList.remove("dragging");
-    const progress = (vDir === 1 ? -dy : dy) / window.innerHeight;
-    settleSheet(vDir, progress > 0.25); // past ~25% of the screen -> open, else snap back
+    const dist = vDir === 1 ? -dy : dy;
+    const progress = dist / window.innerHeight;
+    settleSheet(vDir, sheetShouldOpen(progress, dist, Date.now() - swipeT0)); // far enough, or a fast flick
     return;
   }
   snapBack(); // horizontal that didn't commit -> ease back
@@ -2007,23 +2072,21 @@ document.getElementById("nav-left").addEventListener("click", pageLeft);
 document.getElementById("nav-right").addEventListener("click", pageRight);
 document.getElementById("page-del").addEventListener("click", deleteCurrentPage);
 
-// Sketchpad undo button: tap undoes the last stroke, hold clears the whole page.
+// Sketchpad undo icon: tap undoes the last stroke, hold keeps undoing (faster).
 const padUndoEl = document.getElementById("pad-undo");
-let padUndoTimer = null, padUndoHeld = false;
+let padUndoBtnTimer = null, padUndoBtnHeld = false;
 padUndoEl.addEventListener("pointerdown", (e) => {
   e.preventDefault();
-  padUndoHeld = false;
-  padUndoTimer = setTimeout(() => {
-    padUndoHeld = true;
-    padStrokes = []; redrawSketch(); saveState(); // hold = clear
-  }, 450);
+  padUndoBtnHeld = false;
+  padUndoBtnTimer = setTimeout(() => { padUndoBtnHeld = true; padUndoHoldStart(); }, 300);
 });
 function endPadUndo() {
-  clearTimeout(padUndoTimer);
-  if (!padUndoHeld && padStrokes.length) { padStrokes.pop(); redrawSketch(); saveState(); } // tap = undo one
+  clearTimeout(padUndoBtnTimer);
+  if (padUndoBtnHeld) padUndoHoldStop();
+  else if (padUndoOnce()) saveState(); // tap = undo one
 }
 padUndoEl.addEventListener("pointerup", endPadUndo);
-padUndoEl.addEventListener("pointercancel", () => clearTimeout(padUndoTimer));
+padUndoEl.addEventListener("pointercancel", () => { clearTimeout(padUndoBtnTimer); padUndoHoldStop(); });
 
 /* ---------------- Round flow ---------------- */
 // Collapse the (already faded) arrows from their natural height to zero, in
@@ -2843,8 +2906,8 @@ document.getElementById("menu-lang").addEventListener("click", toggleLang);
 // its edge and commits past ~25%, mirroring the open gesture. The menu closes
 // upward (sign -1); the help closes downward (sign +1).
 function overlaySheetClose(el, sign, onClose) {
-  let sy = 0, sx = 0, on = false, dragging = false;
-  el.addEventListener("pointerdown", (e) => { if (e.pointerType === "mouse") return; on = true; dragging = false; sy = e.clientY; sx = e.clientX; });
+  let sy = 0, sx = 0, t0 = 0, on = false, dragging = false;
+  el.addEventListener("pointerdown", (e) => { if (e.pointerType === "mouse") return; on = true; dragging = false; sy = e.clientY; sx = e.clientX; t0 = Date.now(); });
   el.addEventListener("pointermove", (e) => {
     if (!on) return;
     const dy = e.clientY - sy, dx = e.clientX - sx;
@@ -2863,7 +2926,7 @@ function overlaySheetClose(el, sign, onClose) {
     const closeDelta = sign * (e.clientY - sy);
     el.style.transition = "";
     void el.offsetWidth;
-    if (closeDelta > window.innerHeight * 0.25) onClose(); // commit -> CSS animates to closed
+    if (sheetShouldOpen(closeDelta / window.innerHeight, closeDelta, Date.now() - t0)) onClose(); // far enough, or a fast flick
     el.style.transform = "";                        // still-open class animates it back up
   };
   el.addEventListener("pointerup", end);
