@@ -1065,6 +1065,7 @@ import { buildSnapshot, normalizeSnapshot } from "./src/core/gameState.js";
 import { SAVE_KEY, THEME_KEY, AUTOEQ_KEY, AUTOSIGN_KEY, LANG_KEY, MODE_KEY, TIMED_SEC, MAX_CALCS, THEME_BG } from "./src/config/constants.js";
 import { storage } from "./src/services/storage.js";
 import { t, setLang, getLang } from "./src/services/i18n.js";
+import { encodeGame, parseShareParams } from "./src/services/share.js";
 
 /* ---------------- Number pools ---------------- */
 let largeBag = freshLargeBag();
@@ -2801,12 +2802,7 @@ function showToast(msg) {
   toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2000);
 }
 
-function encodeGame(payload) {
-  return btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-}
-function decodeGame(code) {
-  return JSON.parse(decodeURIComponent(escape(atob(code))));
-}
+// (encodeGame / decodeGame / parseShareParams live in services/share.js)
 
 function sharePuzzle() {
   if (currentTarget === null || !lastOutcome) return;
@@ -3210,21 +3206,8 @@ window.addEventListener("resize", () => { if (document.body.classList.contains("
 // Open a shared puzzle straight into play mode. Modern links use ?g=<base64>;
 // the old ?t=&n= form is still accepted.
 function loadFromURL() {
-  const p = new URLSearchParams(location.search);
-  let data = null;
-
-  const code = p.get("g");
-  if (code) {
-    try { data = decodeGame(code); activeShareCode = code; } catch (e) { data = null; }
-  }
-  if (!data) {
-    const t = parseInt(p.get("t"), 10);
-    const nRaw = p.get("n");
-    if (!isNaN(t) && nRaw) {
-      const nums = nRaw.split(",").map((s) => parseInt(s, 10));
-      if (nums.length === SLOT_COUNT && !nums.some(isNaN)) data = { t: t, n: nums };
-    }
-  }
+  const { data, code } = parseShareParams(location.search);
+  if (code) activeShareCode = code; // remember the ?g= code for refresh-restore
   if (!data) return false;
 
   const t = parseInt(data.t, 10);
