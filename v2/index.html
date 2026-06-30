@@ -88,7 +88,7 @@
     opacity: 0;
     transition: opacity 1s ease; /* gentle fade-in */
   }
-  body.entering .border, body.playing .border { opacity: 1; }
+  body.entering:not(.practice) .border, body.playing:not(.practice) .border { opacity: 1; }
   .border path {
     fill: none;
     stroke: var(--green);
@@ -128,9 +128,19 @@
     opacity: 0;
     transition: opacity 0.3s;
   }
-  body.entering .timer, body.playing .timer { opacity: 1; }
-  body.playing .timer { pointer-events: auto; cursor: pointer; }
-  body.playing .timer:hover { color: var(--ink); }
+  /* Timed/shared games show the timer while entering, playing, and during a
+     shared intro. Practice games have no timer at all. */
+  body.entering:not(.practice) .timer,
+  body.playing:not(.practice) .timer,
+  body.replay .timer,
+  body.home-timer .timer { opacity: 1; } /* home-timer = the budget preview (02:00 / time-to-beat) */
+  /* On home in timed mode the 02:00 sits where the hamburger would — so it
+     doubles as the menu button (tap it, like the timer during play) and the
+     hamburger hides to avoid overlapping it. */
+  body.playing:not(.practice) .timer,
+  body.home-timer .timer { pointer-events: auto; cursor: pointer; }
+  body.home-timer #nav-menu { opacity: 0; pointer-events: none; }
+  body.playing .timer:hover, body.home-timer .timer:hover { color: var(--ink); }
 
   /* Submit lives in the timer/pause menu now (see #menu-submit). */
 
@@ -162,6 +172,9 @@
   body.entering .nav-icon,
   body.playing .nav-icon,
   body.won .nav-icon { opacity: 0; pointer-events: none; }
+  /* Practice has no timer to tap, so keep the hamburger up top for menu access. */
+  body.entering.practice #nav-menu,
+  body.playing.practice #nav-menu { opacity: 0.85; pointer-events: auto; }
   /* During a shared-intro replay the hamburger + profile stay available (so a
      new player can read Help before the puzzle starts) — even while "entering". */
   body.replay .nav-icon { opacity: 0.85; pointer-events: auto; }
@@ -689,7 +702,9 @@
     opacity: 0;
     transition: opacity 0.3s;
   }
-  body.playing .beat.show, body.beat-on .beat.show { opacity: 1; }
+  /* The "Beat X" banner is for play (top timer shows YOUR time then, the banner
+     the goal). During the intro the time-to-beat sits up top instead. */
+  body.playing:not(.practice) .beat.show { opacity: 1; }
 
   .toast {
     position: fixed;
@@ -1039,6 +1054,7 @@ const sketchEl = document.getElementById("sketch");
 const sketchCtx = sketchEl.getContext("2d");
 const dotsEl = document.getElementById("dots");
 const stageEl = document.querySelector(".stage");
+const contentEl = document.querySelector(".content");
 
 let isRollingTarget = false;
 let rollTimers = []; // reel spinner intervals + stagger timeouts, so they can be cancelled
@@ -1059,6 +1075,31 @@ let lastOutcome = null;    // this player's result for the just-finished game
 let sharedGame = null;     // when set, we're playing a puzzle someone sent us
 let borderDurationSec = 120; // how long the green bar takes to go around
 let activeShareCode = null;  // the ?g= code this game came from (for refresh restore)
+const MODE_KEY = "numbersRound.mode.v2";
+const TIMED_SEC = 120;       // own timed game: 2:00 budget (the green lap)
+let gameMode = "timed";      // home preference for your own games: "timed" | "practice"
+let practiceGame = false;    // the in-progress game has no timer/border (set at start)
+// On the home screen, your own game is "practice" only if that's the chosen mode
+// (a shared game always runs timed — you're racing the sender's time).
+function homeIsPractice() { return gameMode === "practice" && !sharedGame; }
+// Show the time budget at the top on home: 2:00 for your timed game, the
+// sender's time-to-beat for a shared game; nothing in practice.
+function refreshHomeTimer() {
+  const b = document.body;
+  const onHome = !b.classList.contains("entering") && !b.classList.contains("playing") &&
+                 !b.classList.contains("won") && !b.classList.contains("replay");
+  if (onHome && !homeIsPractice()) {
+    timerEl.textContent = fmtTime(sharedGame ? borderDurationSec : TIMED_SEC);
+    b.classList.add("home-timer");
+  } else {
+    b.classList.remove("home-timer");
+  }
+}
+function setMode(m) {
+  gameMode = m === "practice" ? "practice" : "timed";
+  try { localStorage.setItem(MODE_KEY, gameMode); } catch (e) {}
+  refreshHomeTimer();
+}
 
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -1311,12 +1352,6 @@ let calcPages = [];        // per-calculator state snapshots
 let padStrokes = [];       // sketchpad strokes; each is an array of {x,y} in 0..1
 let pageIndex = 1;
 
-// Short haptic tick on a button press. Uses the Vibration API — works on Android
-// Chrome; iOS Safari has no web haptics, so it's a silent no-op there.
-function haptic() {
-  if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
-}
-
 function buildKeys() {
   keysEl.innerHTML = "";
   KEYS.forEach((label) => {
@@ -1444,7 +1479,6 @@ function restoreSnapshot(s) {
 }
 function undo() {
   if (undoStack.length === 0) return;
-  haptic(); // the clear (c) key — tap or hold-repeat
   restoreSnapshot(undoStack.pop());
   saveState();
 }
@@ -1454,7 +1488,6 @@ function undo() {
 // auto-sign; with auto-equal on, a completed single operation evaluates.
 function playNumber(entry) {
   if (!entry || entry.tentative || entry === lineEntry) return;
-  haptic(); // a six-number slot, a result chip, or the target placed onto the line
   document.body.classList.remove("del-armed"); // using the calc deselects the x
   pushUndo();
   if (!expectingValue()) {                             // auto-sign between numbers
@@ -1497,7 +1530,6 @@ function renderDisplay() {
 }
 
 function pressKey(label) {
-  haptic();
   document.body.classList.remove("del-armed"); // using the calc deselects the x
   // The clear key is handled separately (multi-click) and never reaches here.
   if (label === "=") { pushUndo(); handleEquals(); return; }
@@ -1940,7 +1972,7 @@ sketchEl.addEventListener("pointercancel", endPadStroke);
    the new one slides in from the other side. Reversed/natural: drag RIGHT goes
    to the page on the LEFT, drag LEFT goes to the page on the right. */
 const calcwrapEl = document.querySelector(".calcwrap");
-let swipeX = 0, swipeY = 0, swipeT0 = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null;
+let swipeX = 0, swipeY = 0, swipeT0 = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null, homeSwiping = false;
 let longPressTimer = null;
 let vDir = 0; // vertical-swipe direction once the axis locks: +1 = help (up), -1 = menu (down)
 // A sheet opens if dragged far enough OR flicked fast enough over a short distance.
@@ -2023,6 +2055,39 @@ function snapBack() {
   setDrag(0);
 }
 
+/* ---- Home: swipe left/right to flip between Practice and Timed modes ----
+   The target + six numbers + arrows (the whole .content) slide out and a fresh
+   set slides in, like the calculator carousel during play. Only allowed on the
+   pristine home screen (nothing rolled/drawn yet) for your own game. */
+function canHomeModeSwipe() {
+  const b = document.body;
+  return !b.classList.contains("playing") && !b.classList.contains("entering") &&
+         !b.classList.contains("won") && !b.classList.contains("replay") &&
+         !sharedGame && currentTarget === null && countFilled() === 0;
+}
+function setContentDrag(px) { contentEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
+function commitModeSwipe(s) { // s = +1 dragged right, -1 dragged left — either way, flip mode
+  swipeDone = true; animating = true;
+  const W = window.innerWidth;
+  contentEl.style.transition = "transform 0.16s ease-in";
+  setContentDrag(s * W);                              // current mode exits in finger direction
+  setTimeout(() => {
+    setMode(gameMode === "timed" ? "practice" : "timed"); // flip + update the top budget
+    contentEl.style.transition = "none";
+    setContentDrag(-s * W);                           // new mode starts off the other side
+    void contentEl.offsetWidth;
+    contentEl.style.transition = "transform 0.22s var(--ease-spring)";
+    setContentDrag(0);
+    setTimeout(() => { contentEl.style.transition = ""; contentEl.style.transform = ""; animating = false; }, 240);
+  }, 160);
+}
+function snapBackContent() {
+  swipeDone = true;
+  contentEl.style.transition = "transform 0.2s var(--ease-spring)";
+  setContentDrag(0);
+  setTimeout(() => { contentEl.style.transition = ""; }, 220);
+}
+
 function tourOrOverlayOpen() {
   return document.body.classList.contains("menu-open") ||
          document.body.classList.contains("guide-open") ||
@@ -2038,7 +2103,7 @@ stageEl.addEventListener("pointerdown", (e) => {
   }
   swipeX = e.clientX; swipeY = e.clientY; swipeT0 = Date.now();
   if (e.pointerType === "mouse") return; // mouse: arms only; arrows for nav
-  swiping = true; swipeHoriz = false; swipeDone = false; swipeAxis = null;
+  swiping = true; swipeHoriz = false; swipeDone = false; swipeAxis = null; homeSwiping = false;
   if (playing) { calcwrapEl.classList.remove("snapback"); calcwrapEl.classList.add("dragging"); }
 });
 stageEl.addEventListener("pointermove", (e) => {
@@ -2055,6 +2120,11 @@ stageEl.addEventListener("pointermove", (e) => {
     swipeHoriz = true;
     setDrag(Math.max(-window.innerWidth, Math.min(window.innerWidth, dx))); // 1:1 follow
     if (Math.abs(dx) >= commitDist()) commitSwipe(dx > 0 ? 1 : -1);
+  } else if (swipeAxis === "h" && canHomeModeSwipe()) {
+    homeSwiping = true;
+    contentEl.style.transition = "none";
+    setContentDrag(Math.max(-window.innerWidth, Math.min(window.innerWidth, dx))); // 1:1 follow
+    if (Math.abs(dx) >= commitDist()) commitModeSwipe(dx > 0 ? 1 : -1);
   } else if (swipeAxis === "v") {
     // drag the help/menu sheet in from its edge, following the finger
     dragSheet(vDir, (vDir === 1 ? -dy : dy) / window.innerHeight);
@@ -2073,7 +2143,8 @@ function endSwipe(e) {
     settleSheet(vDir, sheetShouldOpen(progress, dist, Date.now() - swipeT0)); // far enough, or a fast flick
     return;
   }
-  snapBack(); // horizontal that didn't commit -> ease back
+  if (homeSwiping) { snapBackContent(); return; } // home mode-swipe that didn't commit
+  snapBack(); // horizontal page-swipe that didn't commit -> ease back
 }
 stageEl.addEventListener("pointerup", endSwipe);
 stageEl.addEventListener("pointercancel", endSwipe);
@@ -2158,6 +2229,9 @@ function resetCalc() {
 // Immediate play — no entrance (used by shared links and refresh-restore).
 function startPlaying() {
   if (document.body.classList.contains("playing")) return;
+  if (sharedGame) practiceGame = false; // shared games are always timed
+  document.body.classList.toggle("practice", practiceGame);
+  document.body.classList.remove("home-timer");
   layoutBorder();
   resetBorder();
   initPages();
@@ -2165,8 +2239,7 @@ function startPlaying() {
   document.body.classList.add("playing");
   showCalcInstant();
   collapseArrowsInstant();
-  startTimer();
-  startBorderDrain(0);
+  if (!practiceGame) { startTimer(); startBorderDrain(0); } // timed only
   positionPageDel();
   saveState();
 }
@@ -2180,6 +2253,9 @@ let entranceTimers = [];
 function beginEntrance() {
   if (document.body.classList.contains("playing") ||
       document.body.classList.contains("entering")) return;
+  practiceGame = homeIsPractice(); // shared games never reach here as practice
+  document.body.classList.toggle("practice", practiceGame);
+  document.body.classList.remove("home-timer");
   initPages();
   layoutBorder();
   resetBorder();                 // full, static green ring
@@ -2200,8 +2276,7 @@ function beginEntrance() {
       document.body.classList.add("playing");      // calc fades in immediately
       calcEl.style.maxHeight = "80vh";             // allow the tape to expand
       entranceTimers.push(setTimeout(() => {
-        startTimer();                              // timer starts after the fade
-        startBorderDrain(0);                       // ring begins draining
+        if (!practiceGame) { startTimer(); startBorderDrain(0); } // timed only
         positionPageDel();
         saveState();
       }, FADE_MS));
@@ -2219,11 +2294,14 @@ function backToHome() {
   replaying = false;
   introT0 = null;
   introDraws = [];
-  document.body.classList.remove("playing", "won", "time-up", "entering", "raised", "on-pad", "replay", "beat-on");
+  document.body.classList.remove("playing", "won", "time-up", "entering", "raised", "on-pad", "replay", "beat-on", "practice");
+  practiceGame = false;
   resetArrows();
   resetCalc();
   stopTimer();
   resetSlots();
+  currentTarget = null; // pristine home: target back to 000 (also re-enables mode-swipe)
+  reels.forEach((r) => { r.textContent = "0"; r.className = "reel"; });
   history = [];
   available = [];
   lastResult = null;
@@ -2246,6 +2324,7 @@ function backToHome() {
   redrawSketch();
   renderDisplay();
   clearSave();
+  refreshHomeTimer(); // show the budget for the current mode (or hide in practice)
   window.history.replaceState({}, "", location.pathname);
 }
 
@@ -2285,7 +2364,7 @@ function currentGoal() {
 
 function finishSolved() {
   flushAnswerToTape();
-  lastOutcome = { solved: true, timeSec: elapsedSeconds(), score: currentTarget, goal: currentGoal(), distance: 0 };
+  lastOutcome = { solved: true, timeSec: practiceGame ? 0 : elapsedSeconds(), score: currentTarget, goal: currentGoal(), distance: 0 };
   endGame();
 }
 
@@ -2297,7 +2376,7 @@ function finishSubmitted() {
   const goal = currentGoal();
   lastOutcome = {
     solved: false,
-    timeSec: elapsedSeconds(),
+    timeSec: practiceGame ? 0 : elapsedSeconds(),
     score: score,
     goal: goal,
     distance: Math.abs(score - goal),
@@ -2361,8 +2440,10 @@ function endGame() {
     });
     winTheirEl.classList.add("show");
   } else {
-    winLabelEl.textContent = me.solved ? t("win.solvedIn") : t("win.yourScore");
-    winValueEl.textContent = fmtResult(me);
+    // Practice has no clock, so a solved practice game shows the number reached
+    // ("Solved it!") instead of a time.
+    winLabelEl.textContent = me.solved ? (practiceGame ? t("win.solvedIt") : t("win.solvedIn")) : t("win.yourScore");
+    winValueEl.textContent = (practiceGame && me.solved) ? String(me.score) : fmtResult(me);
     winSubEl.textContent = me.solved
       ? ""
       : me.distance === 0
@@ -2472,6 +2553,7 @@ function saveState() {
     pageIndex: pageIndex,
     lastOutcome: lastOutcome,
     sharedGame: sharedGame,
+    practiceGame: practiceGame,
     borderDurationSec: borderDurationSec,
     startEpoch: startEpoch,
     largeBag: largeBag,
@@ -2518,6 +2600,7 @@ function restoreState(s) {
   if (s.smallBag) smallBag = s.smallBag.slice();
   lastOutcome = s.lastOutcome || null;
   sharedGame = s.sharedGame || null;
+  practiceGame = !!s.practiceGame && !sharedGame;
   borderDurationSec = s.borderDurationSec || 120;
   startEpoch = s.startEpoch || Date.now();
   activeShareCode = s.shareCode || null;
@@ -2556,23 +2639,27 @@ function restoreState(s) {
   }
 
   if (s.phase === "play") {
+    document.body.classList.toggle("practice", practiceGame);
+    document.body.classList.remove("home-timer");
     layoutBorder();
     resetBorder();
-    const elapsed = (Date.now() - startEpoch) / 1000;
     document.body.classList.remove("time-up", "entering", "raised");
     document.body.classList.add("playing");
     showCalcInstant();
     collapseArrowsInstant();
-    runTimerLoop();
-    if (elapsed >= borderDurationSec) {
-      // Time already up: lock the red ring and reveal submit.
-      borderPath.style.animation = "none";
-      borderPath.style.stroke = "var(--red)";
-      borderPath.style.strokeDashoffset = "0";
-      document.body.classList.add("time-up");
-    } else {
-      // Resume the drain partway through.
-      startBorderDrain(elapsed);
+    if (!practiceGame) {
+      const elapsed = (Date.now() - startEpoch) / 1000;
+      runTimerLoop();
+      if (elapsed >= borderDurationSec) {
+        // Time already up: lock the red ring and reveal submit.
+        borderPath.style.animation = "none";
+        borderPath.style.stroke = "var(--red)";
+        borderPath.style.strokeDashoffset = "0";
+        document.body.classList.add("time-up");
+      } else {
+        // Resume the drain partway through.
+        startBorderDrain(elapsed);
+      }
     }
     return true;
   }
@@ -2900,7 +2987,10 @@ function restartShared() {
   }
   activeShareCode = code;
   sharedGame = sg;
+  practiceGame = false;
   borderDurationSec = sg.s && sg.s > 0 ? sg.s : 120;
+  timerEl.textContent = fmtTime(borderDurationSec); // time-to-beat up top during the intro
+  document.body.classList.remove("home-timer");
   refreshBeat();
   beatEl.classList.add("show");
 }
@@ -2990,6 +3080,7 @@ function tourSetTarget() {
 }
 function tourFillNumbers() {
   if (document.body.classList.contains("playing")) return;
+  practiceGame = false; // the walkthrough demo shows the timed layout
   currentTarget = currentTarget || 642;
   const demo = [100, 75, 8, 3, 50, 25];
   for (let i = 0; i < SLOT_COUNT; i++) {
@@ -3126,6 +3217,10 @@ function loadFromURL() {
         },
       };
       borderDurationSec = data.s && data.s > 0 ? data.s : 120;
+      practiceGame = false; // shared games are always timed
+      // Show the time-to-beat up top (where the timer sits) during the intro.
+      timerEl.textContent = fmtTime(borderDurationSec);
+      document.body.classList.remove("home-timer");
       refreshBeat();
       beatEl.classList.add("show");
     } else {
@@ -3194,7 +3289,6 @@ function stopRoll() {
 
 function rollTarget() {
   if (isRollingTarget) return;
-  haptic();              // tapping the target to roll it
   backToHome();          // clean slate (also stops any prior roll)
   isRollingTarget = true;
   introT0 = Date.now();  // start recording the intro for a shareable replay
@@ -3268,6 +3362,7 @@ function playIntro(t, nums, draws) {
   backToHome();                       // clean slate (clears replay/intro)
   replaying = true;
   document.body.classList.add("replay");
+  document.body.classList.remove("home-timer"); // caller sets the time-to-beat text
   currentTarget = t;
   introDraws = draws.slice();         // keep so a re-share replays too
   pbNums = nums.slice();
@@ -3374,10 +3469,12 @@ setArrowsEnabled(false); // can't draw numbers until a target is generated
 layoutBorder();
 sizeSketch();
 lang = (localStorage.getItem(LANG_KEY) === "ko") ? "ko" : "en";
+gameMode = (localStorage.getItem(MODE_KEY) === "practice") ? "practice" : "timed";
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
 applyAutoEqual((localStorage.getItem(AUTOEQ_KEY) || "on") !== "off");
 applyAutoSign(localStorage.getItem(AUTOSIGN_KEY) || "x");
 applyLang();
+refreshHomeTimer(); // show 02:00 on the home screen in timed mode
 
 // On load: restore an in-progress game unless the URL points at a *different*
 // shared puzzle (a fresh challenge link). Otherwise open whatever the URL has.
