@@ -106,10 +106,6 @@
     from { stroke-dashoffset: 0; }     /* full perimeter */
     to   { stroke-dashoffset: -1000; } /* empty, draining clockwise */
   }
-  @keyframes borderFill {
-    from { stroke-dashoffset: 1000; }  /* empty */
-    to   { stroke-dashoffset: 0; }     /* full, filling clockwise */
-  }
   /* Runs alongside the drain: holds green, then snaps to red at the end of its
      own (shorter) duration — the halfway mark on a 2:00 timed game. */
   @keyframes borderHalf {
@@ -1095,7 +1091,8 @@ function refreshHomeTimer() {
   const onHome = !b.classList.contains("entering") && !b.classList.contains("playing") &&
                  !b.classList.contains("won") && !b.classList.contains("replay");
   if (onHome && !homeIsPractice()) {
-    timerEl.textContent = fmtTime(sharedGame ? borderDurationSec : TIMED_SEC);
+    const solvedShare = sharedGame && sharedGame.outcome && sharedGame.outcome.solved;
+    timerEl.textContent = fmtTime(solvedShare ? sharedGame.outcome.timeSec : TIMED_SEC);
     b.classList.add("home-timer");
   } else {
     b.classList.remove("home-timer");
@@ -1271,19 +1268,13 @@ if (window.visualViewport) {
 // (same duration as the green lap); when that finishes, it stays solid red.
 borderPath.addEventListener("animationend", (e) => {
   if (e.animationName === "borderDrain") {
+    // The 2:00 clock is up (own and shared): auto-register the score.
     document.body.classList.add("time-up");
-    // Own 2:00 game: the clock's up, auto-register the score. Shared games keep
-    // growing a red ring so the recipient can still go over the sender's time.
-    if (sharedGame) startRedFill();
-    else autoSubmitTimeUp();
-  } else if (e.animationName === "borderFill") {
-    borderPath.style.animation = "none";
-    borderPath.style.stroke = "var(--red)";
-    borderPath.style.strokeDashoffset = "0"; // solid full red
+    autoSubmitTimeUp();
   }
 });
-// Time's up on an own timed game: score the calculator page you're on (or, from
-// the sketchpad, the calc page immediately to its right).
+// Time's up: score the calculator page you're on (or, from the sketchpad, the
+// calc page immediately to its right).
 function autoSubmitTimeUp() {
   if (document.body.classList.contains("won")) return;
   if (pageIndex === 0) gotoPageCore(1); // sketchpad -> first calc page
@@ -1298,30 +1289,20 @@ function resetBorder() {
   borderPath.style.animationDelay = "";
   borderPath.style.animationPlayState = "";
 }
-// Start (or resume, via delaySec) the green drain — full to empty, clockwise.
-// Own timed games also turn red at the halfway mark (borderHalf); shared games
-// drain plain green (then grow a red overtime ring — see the animationend).
+// Start (or resume, via delaySec) the green drain over a fixed 2:00. The ring
+// turns red at the 1:00 halfway mark — or, on a shared game whose sender solved,
+// at the sender's solve time (the moment you fall behind their pace).
 function startBorderDrain(delaySec) {
   const d = delaySec || 0;
+  const solvedShare = sharedGame && sharedGame.outcome && sharedGame.outcome.solved;
+  const redSec = solvedShare
+    ? Math.max(1, Math.min(borderDurationSec, Math.round(sharedGame.outcome.timeSec)))
+    : borderDurationSec / 2;
   borderPath.style.stroke = "";
   borderPath.style.strokeDashoffset = "";
-  if (sharedGame) {
-    borderPath.style.animation = "borderDrain " + borderDurationSec + "s linear forwards";
-    borderPath.style.animationDelay = "-" + d + "s";
-  } else {
-    const redSec = borderDurationSec / 2; // 1:00 on a 2:00 game
-    borderPath.style.animation =
-      "borderDrain " + borderDurationSec + "s linear forwards, borderHalf " + redSec + "s linear forwards";
-    borderPath.style.animationDelay = "-" + d + "s, -" + d + "s";
-  }
-}
-// Red ring grows clockwise for one rotation (same duration as the green lap),
-// then locks solid.
-function startRedFill() {
-  borderPath.style.stroke = "var(--red)";
-  borderPath.style.strokeDashoffset = "";
-  borderPath.style.animationDelay = "0s";
-  borderPath.style.animation = "borderFill " + borderDurationSec + "s linear forwards";
+  borderPath.style.animation =
+    "borderDrain " + borderDurationSec + "s linear forwards, borderHalf " + redSec + "s linear forwards";
+  borderPath.style.animationDelay = "-" + d + "s, -" + d + "s";
 }
 
 /* ---------------- Timer text ---------------- */
@@ -2636,7 +2617,7 @@ function restoreState(s) {
   lastOutcome = s.lastOutcome || null;
   sharedGame = s.sharedGame || null;
   practiceGame = !!s.practiceGame && !sharedGame;
-  borderDurationSec = s.borderDurationSec || 120;
+  borderDurationSec = 120; // fixed 2:00 for everyone now
   startEpoch = s.startEpoch || Date.now();
   activeShareCode = s.shareCode || null;
 
@@ -3023,8 +3004,8 @@ function restartShared() {
   activeShareCode = code;
   sharedGame = sg;
   practiceGame = false;
-  borderDurationSec = sg.s && sg.s > 0 ? sg.s : 120;
-  timerEl.textContent = fmtTime(borderDurationSec); // time-to-beat up top during the intro
+  borderDurationSec = 120; // receiver always gets the full 2:00
+  timerEl.textContent = fmtTime(sg.outcome && sg.outcome.solved ? (Number(sg.outcome.timeSec) || 120) : 120);
   document.body.classList.remove("home-timer");
   refreshBeat();
   beatEl.classList.add("show");
@@ -3251,10 +3232,10 @@ function loadFromURL() {
           working: data.w || [],
         },
       };
-      borderDurationSec = data.s && data.s > 0 ? data.s : 120;
+      borderDurationSec = 120; // receiver always gets the full 2:00 (red at the sender's time)
       practiceGame = false; // shared games are always timed
-      // Show the time-to-beat up top (where the timer sits) during the intro.
-      timerEl.textContent = fmtTime(borderDurationSec);
+      // Time-to-beat up top during the intro: the sender's solve time, else 2:00.
+      timerEl.textContent = fmtTime(data.o.solved ? (Number(data.o.timeSec) || 120) : 120);
       document.body.classList.remove("home-timer");
       refreshBeat();
       beatEl.classList.add("show");
