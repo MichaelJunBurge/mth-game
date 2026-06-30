@@ -5,7 +5,10 @@
 <!-- viewport-fit=cover: let the page (and the green ring) paint all the way to
      the physical screen edges, into the notch / home-indicator safe areas. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<meta name="color-scheme" content="light" />
+<!-- Tints the browser chrome / status bar (Android Chrome, iOS Safari 15+) to
+     match the theme; updated live by applyTheme(). color-scheme is driven from
+     CSS (:root vs :root.dark) so native areas + form controls follow too. -->
+<meta name="theme-color" id="theme-color-meta" content="#ffffff" />
 <!-- Added-to-home-screen runs fullscreen, so the ring wraps the whole screen. -->
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -37,9 +40,12 @@
     /* Opacity convention: anything you cannot click sits at 20%. */
     --muted: rgba(17, 17, 17, 0.2);
     --grid: #ececec;       /* sketchpad grid lines */
+    color-scheme: light;   /* native areas / form controls follow the theme */
   }
-  /* Dark theme */
-  body.dark {
+  /* Dark theme — defined on the <html> element (:root.dark) so the html
+     background (and therefore the safe-area / browser-chrome region) goes dark
+     too, not just <body>. The .dark class is toggled on BOTH html and body. */
+  :root.dark, body.dark {
     --bg: #14161a;
     --ink: #ececec;
     --grey: #5a5e66;
@@ -47,6 +53,7 @@
     --muted: rgba(236, 236, 236, 0.25);
     --grid: #24262c;
   }
+  :root.dark { color-scheme: dark; }
   @media (min-width: 768px) {
     :root { --app-w: min(33vw, 310px); }         /* desktop: ~a third, capped */
   }
@@ -3029,7 +3036,10 @@ function renderHelp() {
 
 function applyTheme(theme) {
   const dark = theme === "dark";
+  document.documentElement.classList.toggle("dark", dark); // html -> safe-area bg + color-scheme
   document.body.classList.toggle("dark", dark);
+  const meta = document.getElementById("theme-color-meta");
+  if (meta) meta.setAttribute("content", dark ? "#14161a" : "#ffffff"); // browser chrome / status bar
   document.getElementById("menu-theme").textContent = dark ? t("theme.light") : t("theme.dark");
 }
 function toggleTheme() {
