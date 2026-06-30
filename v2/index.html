@@ -2505,12 +2505,12 @@ function endGame() {
   const me = lastOutcome;
   winTheirEl.classList.remove("show");
   winTheirEl.innerHTML = "";
-  let celebrate = !!me.solved; // completing the puzzle always celebrates
+  let celebrate = false;
 
   if (sharedGame) {
     const them = sharedGame.outcome;
     const v = verdict(me, them);
-    if (v === "win") celebrate = true; // ...so does beating the sender
+    celebrate = v === "win"; // a shared game only celebrates a new record (beating them)
     winLabelEl.textContent = v === "win" ? t("win.youWin") : v === "lose" ? t("win.youLose") : t("win.tie");
     winValueEl.textContent = fmtResult(me);
     winSubEl.textContent = me.solved
@@ -2534,6 +2534,7 @@ function endGame() {
     });
     winTheirEl.classList.add("show");
   } else {
+    celebrate = me.solved || me.distance <= 10; // your own game: solved, or within 10 of the goal
     winLabelEl.textContent = me.solved ? t("win.solvedIn") : t("win.yourScore");
     winValueEl.textContent = fmtResult(me);
     winSubEl.textContent = me.solved
@@ -3259,6 +3260,7 @@ function goHome() {
 }
 
 function handleTargetPress() {
+  if (targetHeld) { targetHeld = false; return; } // a hold-to-reset already handled it
   if (replaying) return; // watching a shared intro — no interaction
   if (document.body.classList.contains("playing")) {
     // v2: click the target to place its value (usable once, like a number).
@@ -3415,6 +3417,22 @@ targetEl.addEventListener("keydown", (e) => {
     handleTargetPress();
   }
 });
+// Press and hold the generated target on the home screen to clear it back to 000
+// (re-enabling the mode swipe). A normal tap still re-rolls a new target.
+let targetHoldTimer = null, targetHeld = false, targetDownX = 0, targetDownY = 0;
+targetEl.addEventListener("pointerdown", (e) => {
+  targetHeld = false;
+  targetDownX = e.clientX; targetDownY = e.clientY;
+  if (!document.body.classList.contains("playing") && !replaying && currentTarget !== null) {
+    clearTimeout(targetHoldTimer);
+    targetHoldTimer = setTimeout(() => { targetHeld = true; goHome(); }, 500);
+  }
+});
+targetEl.addEventListener("pointermove", (e) => {
+  if (targetHoldTimer && Math.hypot(e.clientX - targetDownX, e.clientY - targetDownY) > 10) clearTimeout(targetHoldTimer);
+});
+targetEl.addEventListener("pointerup", () => clearTimeout(targetHoldTimer));
+targetEl.addEventListener("pointercancel", () => clearTimeout(targetHoldTimer));
 
 /* ---------------- Init ---------------- */
 // Collapse the tape and release the layout pin.
