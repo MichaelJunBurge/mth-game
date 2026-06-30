@@ -14,9 +14,16 @@ test("basic operators (x ÷ + - ^)", () => {
   assert.deepEqual(evalExpression("2^3"), { status: "ok", closed: "2^3", value: 8 });
 });
 
-test("square root: perfect square is ok, non-perfect is a fraction", () => {
-  assert.deepEqual(evalExpression("√(25)"), { status: "ok", closed: "√(25)", value: 5 });
-  assert.equal(evalExpression("√(2)").status, "fraction");
+test("binary root: a√b = b-th root of a (whole results, FP rounded)", () => {
+  assert.equal(evalExpression("25√2").value, 5);  // square root
+  assert.equal(evalExpression("8√3").value, 2);   // cube root (FP -> rounds to 2)
+  assert.equal(evalExpression("32√5").value, 2);  // 5th root
+  assert.equal(evalExpression("100√2").value, 10); // sqrt(100) = 10
+});
+
+test("binary root: a non-whole root is a fraction", () => {
+  assert.equal(evalExpression("25√3").status, "fraction"); // 25^(1/3) ~ 2.92
+  assert.equal(evalExpression("2√2").status, "fraction");  // sqrt(2)
 });
 
 test("fractions are rejected with the rounded value", () => {

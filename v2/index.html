@@ -1448,6 +1448,7 @@ let lineSum = null;        // value of the running result currently on the line
 // lineEntry is the LAST result entry in `available` (slotIndex null, !isTarget) —
 // that's how undo/restore re-derive it. Keep evaluate()/clearLine() consistent.
 let lineEntry = null;
+let lastPlayed = null;     // the most recent number placed (for the decimal-error revert)
 let autoEqual = true;      // auto-evaluate each step (toggle in the menu)
 let autoSign = "x";        // sign auto-inserted between two numbers (menu choice)
 let undoStack = [];        // full-state snapshots so clear-once can undo
@@ -1545,14 +1546,13 @@ function renderGenerated() {
 // True when the line is expecting a value (start / after an operator or "(").
 function expectingValue() {
   if (expr === "") return true;
-  return /[+\-x÷^(]/.test(expr[expr.length - 1]);
+  return /[+\-x÷^(√]/.test(expr[expr.length - 1]); // √ is binary: a value follows it
 }
 
 // A finished single operation that auto-evaluates (one step at a time):
-// "num op num" or "√(num)".
+// "num op num" (√ is binary now, so it's just another operator here).
 function readyToAutoEval() {
-  return /^-?\d+(?:\.\d+)?[-+x÷^]-?\d+(?:\.\d+)?$/.test(expr) ||
-         /^√\(-?\d+(?:\.\d+)?\)$/.test(expr);
+  return /^-?\d+(?:\.\d+)?[-+x÷^√]-?\d+(?:\.\d+)?$/.test(expr);
 }
 
 // Whole-calculator snapshot so one clear-click can undo the last action.
@@ -1596,6 +1596,7 @@ function undo() {
 // auto-sign; with auto-equal on, a completed single operation evaluates.
 function playNumber(entry) {
   if (!entry || entry.tentative || entry === lineEntry) return;
+  lastPlayed = entry; // the most recent number on the line (for the decimal-error revert)
   document.body.classList.remove("del-armed"); // using the calc deselects the x
   pushUndo();
   if (!expectingValue()) {                             // auto-sign between numbers
@@ -1606,7 +1607,6 @@ function playNumber(entry) {
   }
   entry.tentative = true;
   expr += String(entry.value);
-  if (/^√\(-?\d+(?:\.\d+)?$/.test(expr)) expr += ")";   // auto-close a sqrt
   refreshSlots();
   renderGenerated();
   renderDisplay();
@@ -1644,20 +1644,7 @@ function pressKey(label) {
   if (label === "=") { pushUndo(); handleEquals(); return; }
   pushUndo();
   if (label === "()") { expr += nextBracket(); renderDisplay(); saveState(); return; }
-  if (label === "√") {
-    // sqrt of the current single value, else start a sqrt group
-    if (/^-?\d+(?:\.\d+)?$/.test(expr)) {
-      expr = "√(" + expr + ")";
-      renderDisplay();
-      if (autoEqual) { pushUndo(); evaluate(); } else saveState();
-    } else {
-      expr += "√(";
-      renderDisplay();
-      saveState();
-    }
-    return;
-  }
-  expr += label; // binary operator: + - x ÷ ^
+  expr += label; // binary operator: + - x ÷ ^ √  (a√b = b-th root of a)
   renderDisplay();
   saveState();
 }
@@ -1735,26 +1722,13 @@ function showError() {
   displayEl.className = "display error";
 }
 
-// A fraction was produced: flag the error and roll the line back to where it
-// started — to the running sum if it continued from one, else to just the first
-// number placed on a fresh line (freeing the numbers/operators added after it).
+// A fraction was produced: flag the error and drop ONLY the last number entered,
+// keeping everything before it — the running sum / first number AND the operator.
+// (So "25÷3" -> "25÷", "800√3" -> "800√"; you just pick a different last number.)
 let errorFlashTimer = null;
 function decimalError() {
-  if (lineSum !== null) {
-    available.forEach((e) => { e.tentative = false; });
-    expr = String(lineSum);   // back to just the sum
-  } else {
-    // Fresh line: keep the first number placed, free the rest.
-    const m = expr.match(/^\d+/);
-    const firstVal = m ? Number(m[0]) : NaN;
-    let kept = false;
-    available.forEach((e) => {
-      if (!kept && e.tentative && e.value === firstVal) kept = true; // leave this one placed
-      else e.tentative = false;
-    });
-    expr = kept ? String(firstVal) : "";
-    if (!kept) lineEntry = null;
-  }
+  if (lastPlayed && lastPlayed.tentative) lastPlayed.tentative = false; // free that last number
+  expr = expr.replace(/\d+$/, ""); // strip the trailing number, leave the operator
   refreshSlots();
   renderGenerated();
   showError();                // flash "Error", then reveal the restored line

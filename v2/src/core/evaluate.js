@@ -3,6 +3,9 @@
 // auto-closes brackets, computes, and classifies the result. The caller decides
 // what to do with each status (render error, reject fractions, commit, etc.).
 //
+// √ is a BINARY root: a√b = the b-th root of a = a**(1/b) (e.g. 25√2 = 5,
+// 8√3 = 2). Both operands are numbers in the normal number-symbol-number flow.
+//
 // Game syntax: digits, + - x ÷ ^ √ ( ) . and spaces. Returns:
 //   { status: "empty" }                      — nothing to evaluate
 //   { status: "invalid", closed? }           — bad characters, or eval failed / non-finite
@@ -18,7 +21,7 @@ export function evalExpression(expr) {
   const closed = unclosed > 0 ? expr + ")".repeat(unclosed) : expr;
 
   const js = closed
-    .replace(/√/g, "Math.sqrt")
+    .replace(/(\d+(?:\.\d+)?)√(\d+(?:\.\d+)?)/g, "Math.pow($1,1/($2))") // a√b = b-th root of a
     .replace(/x/g, "*")
     .replace(/÷/g, "/")
     .replace(/\^/g, "**");
