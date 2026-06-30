@@ -213,6 +213,44 @@
      land (entering), so the menu icon and timer never show at the same time. */
   body.replay:not(.entering):not(.playing) .nav-icon { opacity: 0.85; pointer-events: auto; }
 
+  /* ---- Multiplayer home page (coming soon) ---- */
+  /* Replaces the target + numbers with a single centred word on the multiplayer
+     carousel page. Tapping the word reveals "Coming soon"; taps to either side
+     still flip the carousel (the word is a <button>, so it's the only thing that
+     doesn't navigate). */
+  .mp-home { display: none; }
+  body.home-multiplayer #target,
+  body.home-multiplayer #slots,
+  body.home-multiplayer .calcwrap { display: none; }
+  body.home-multiplayer .mp-home {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6em;
+    min-height: 40dvh;
+  }
+  .mp-word {
+    background: none;
+    border: none;
+    color: var(--ink);
+    cursor: pointer;
+    font-size: calc(var(--size-ui) * 1.5);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    padding: 0.3em 0.5em;
+    transition: opacity 0.15s ease, transform 0.08s;
+  }
+  .mp-word:hover { opacity: 0.85; }
+  .mp-word:active { transform: scale(0.96); }
+  .mp-soon {
+    color: var(--muted, var(--ink));
+    opacity: 0;
+    font-size: calc(var(--size-ui) * 0.95);
+    transition: opacity 0.25s ease;
+  }
+  #mp-home.revealed .mp-soon { opacity: 0.7; }
+
   /* ---- Pages: sketchpad + calculators carousel ---- */
   /* Sketchpad: full-screen drawing surface with a faint grid. Shown only while
      viewing the pad page (body.on-pad). */
@@ -918,13 +956,13 @@
       <line x1="4" y1="17" x2="20" y2="17" />
     </svg>
   </button>
-  <button id="nav-help" class="nav-icon nav-bottom" aria-label="How to play">
+  <button id="nav-help" class="nav-icon nav-bottom" aria-label="Profile">
+    <!-- Profile glyph (the old #nav-profile person), sized to read the same as the
+         question mark it replaced. Placeholder until login lands; opens the menu. -->
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <!-- Scaled up ~1.3x (non-scaling-stroke keeps the line weight matching the
-           hamburger) so the question mark reads the same size as it. -->
-      <g transform="translate(12 12) scale(1.3) translate(-12 -12)">
-        <path vector-effect="non-scaling-stroke" d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-        <line vector-effect="non-scaling-stroke" x1="12" y1="17" x2="12.01" y2="17" />
+      <g transform="translate(12 12) scale(0.92) translate(-12 -12)">
+        <circle vector-effect="non-scaling-stroke" cx="12" cy="8.5" r="3.4" />
+        <path vector-effect="non-scaling-stroke" d="M5.5 19c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5" />
       </g>
     </svg>
   </button>
@@ -963,6 +1001,13 @@
           <div id="display" class="display empty"><span class="val">00</span></div>
           <div id="keys" class="keys"></div>
         </div>
+      </div>
+
+      <!-- Multiplayer home page: just the word (tap it for "coming soon"). Taps to
+           either side still flip the carousel; shown only when home-multiplayer. -->
+      <div id="mp-home" class="mp-home">
+        <button id="mp-word" class="mp-word" data-i18n="mp.title">Multiplayer</button>
+        <div id="mp-soon" class="mp-soon" data-i18n="mp.soon">Coming soon</div>
       </div>
     </div>
   </main>
@@ -1099,18 +1144,24 @@ let lastOutcome = null;    // this player's result for the just-finished game
 let sharedGame = null;     // when set, we're playing a puzzle someone sent us
 let borderDurationSec = TIMED_SEC; // how long the green bar takes to go around
 let activeShareCode = null;  // the ?g= code this game came from (for refresh restore)
-let gameMode = "timed";      // home preference for your own games: "timed" | "practice"
+// Home carousel pages, in left-to-right order. App opens on "practice"; "ranked"
+// is its right neighbour, "multiplayer" its left. The carousel loops both ways.
+// "ranked" is the timed (2:00) mode whose results feed the leaderboard.
+const HOME_ORDER = ["multiplayer", "practice", "ranked"];
+let gameMode = "practice";   // which home page is showing: "practice" | "ranked" | "multiplayer"
 let practiceGame = false;    // the in-progress game has no timer/border (set at start)
 // On the home screen, your own game is "practice" only if that's the chosen mode
-// (a shared game always runs timed — you're racing the sender's time).
+// (a shared game always runs ranked/timed — you're racing the sender's time).
 function homeIsPractice() { return gameMode === "practice" && !sharedGame; }
-// Show the time budget at the top on home: 2:00 for your timed game, the
-// sender's time-to-beat for a shared game; nothing in practice.
+// Show the time budget at the top on home: 2:00 for a ranked game, the sender's
+// time-to-beat for a shared game; nothing in practice or on the multiplayer page.
+// Also toggle the multiplayer "coming soon" home page.
 function refreshHomeTimer() {
   const b = document.body;
   const onHome = !b.classList.contains("entering") && !b.classList.contains("playing") &&
                  !b.classList.contains("won") && !b.classList.contains("replay");
-  if (onHome && !homeIsPractice()) {
+  b.classList.toggle("home-multiplayer", onHome && gameMode === "multiplayer");
+  if (onHome && gameMode === "ranked") {
     timerEl.textContent = fmtTime(TIMED_SEC); // 02:00 budget
     b.classList.add("home-timer");
   } else {
@@ -1118,7 +1169,7 @@ function refreshHomeTimer() {
   }
 }
 function setMode(m) {
-  gameMode = m === "practice" ? "practice" : "timed";
+  gameMode = HOME_ORDER.includes(m) ? m : "practice";
   storage.set(MODE_KEY, gameMode);
   refreshHomeTimer();
 }
@@ -2127,10 +2178,10 @@ function snapBack() {
   setDrag(0);
 }
 
-/* ---- Home: swipe left/right to flip between Practice and Timed modes ----
-   The target + six numbers + arrows (the whole .content) slide out and a fresh
-   set slides in, like the calculator carousel during play. Only allowed on the
-   pristine home screen (nothing rolled/drawn yet) for your own game. */
+/* ---- Home: swipe/tap left-right through the Multiplayer · Practice · Ranked
+   carousel. The whole .content slides out and the next page slides in, like the
+   calculator carousel during play, and it loops in both directions. Only allowed
+   on the pristine home screen (nothing rolled/drawn yet) for your own game. */
 function canHomeModeSwipe() {
   const b = document.body;
   return !b.classList.contains("playing") && !b.classList.contains("entering") &&
@@ -2138,15 +2189,20 @@ function canHomeModeSwipe() {
          !sharedGame && currentTarget === null && countFilled() === 0;
 }
 function setContentDrag(px) { contentEl.style.transform = px ? "translateX(" + px + "px)" : ""; }
-function commitModeSwipe(s) { // s = +1 dragged right, -1 dragged left — either way, flip mode
+function nextHomeMode(goRight) {
+  const i = HOME_ORDER.indexOf(gameMode), n = HOME_ORDER.length;
+  return HOME_ORDER[(i + (goRight ? 1 : -1) + n) % n];
+}
+function commitModeSwipe(goRight) { // goRight: tapped/swiped toward the right — go to the right neighbour
   swipeDone = true; animating = true;
-  const W = window.innerWidth;
+  const W = window.innerWidth, s = goRight ? 1 : -1;
+  document.getElementById("mp-home").classList.remove("revealed"); // reset the coming-soon state
   contentEl.style.transition = "transform 0.16s ease-in";
-  setContentDrag(s * W);                              // current mode exits in finger direction
+  setContentDrag(s * W);                              // current page exits toward the tapped side
   setTimeout(() => {
-    setMode(gameMode === "timed" ? "practice" : "timed"); // flip + update the top budget
+    setMode(nextHomeMode(goRight));
     contentEl.style.transition = "none";
-    setContentDrag(-s * W);                           // new mode starts off the other side
+    setContentDrag(-s * W);                           // new page starts off the other side
     void contentEl.offsetWidth;
     contentEl.style.transition = "transform 0.22s var(--ease-spring)";
     setContentDrag(0);
@@ -2194,7 +2250,7 @@ stageEl.addEventListener("click", (e) => {
     else if (e.clientX > r.right) pageRight();
     else if (document.body.classList.contains("tape-open")) collapseTape(); // centre tap closes the tape
   } else if (canHomeModeSwipe()) {
-    commitModeSwipe(e.clientX < window.innerWidth / 2 ? 1 : -1); // left half slides like a right-swipe
+    commitModeSwipe(e.clientX > window.innerWidth / 2); // right half -> right neighbour, left half -> left
   }
 });
 stageEl.addEventListener("pointermove", (e) => {
@@ -2216,7 +2272,7 @@ stageEl.addEventListener("pointermove", (e) => {
     homeSwiping = true;
     contentEl.style.transition = "none";
     setContentDrag(Math.max(-window.innerWidth, Math.min(window.innerWidth, dx))); // 1:1 follow
-    if (Math.abs(dx) >= commitDist()) commitModeSwipe(dx > 0 ? 1 : -1);
+    if (Math.abs(dx) >= commitDist()) commitModeSwipe(dx > 0); // drag right -> right neighbour
   } else if (swipeAxis === "v") {
     // drag the help/menu sheet in from its edge, following the finger
     dragSheet(vDir, (vDir === 1 ? -dy : dy) / window.innerHeight);
@@ -3000,6 +3056,9 @@ function restartShared() {
 timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-help").addEventListener("click", openGuide);
+// Multiplayer home page: tapping the word reveals "Coming soon" (it's a button so
+// it doesn't trigger carousel navigation the way the surrounding area does).
+document.getElementById("mp-word").addEventListener("click", () => document.getElementById("mp-home").classList.add("revealed"));
 document.getElementById("menu-lang").addEventListener("click", toggleLang);
 
 // Drag-to-close on the overlays: the open sheet follows the finger back toward
@@ -3102,6 +3161,7 @@ function tourDemoCalc() {
 }
 function startTour() {
   tourIndex = 0;
+  setMode("practice");   // the demo needs the target/numbers, which the multiplayer page hides
   document.body.classList.add("tour-on");
   showTourStep();
 }
@@ -3281,6 +3341,7 @@ function stopRoll() {
 
 function rollTarget() {
   if (isRollingTarget) return;
+  if (gameMode === "multiplayer" && !sharedGame) return; // multiplayer is "coming soon" — no game to start
   backToHome();          // clean slate (also stops any prior roll)
   isRollingTarget = true;
   introT0 = Date.now();  // start recording the intro for a shareable replay
@@ -3474,7 +3535,7 @@ setArrowsEnabled(false); // can't draw numbers until a target is generated
 layoutBorder();
 sizeSketch();
 setLang(storage.get(LANG_KEY) === "ko" ? "ko" : "en");
-gameMode = (storage.get(MODE_KEY) === "practice") ? "practice" : "timed";
+gameMode = "practice"; // always open on practice so ranked games are never started by accident
 applyTheme(storage.get(THEME_KEY) || "light");
 applyScale(storage.get(SCALE_KEY) || 1);
 applyAutoEqual((storage.get(AUTOEQ_KEY) || "on") !== "off");

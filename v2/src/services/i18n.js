@@ -23,6 +23,8 @@ export const I18N = {
     "guide.overview": "Overview",
     "guide.profile": "Profile",
     "profile.soon": "Profiles & leaderboards are coming soon.",
+    "mp.title": "Multiplayer",
+    "mp.soon": "Coming soon",
     "overview": [
       "Reach the target number, or work all the way down to 0, using each of your six numbers exactly once.",
       "You don't have to be exact — you're scored by how close you get. If nobody solves it, the closest answer wins, and a faster time breaks ties.",
@@ -70,6 +72,8 @@ export const I18N = {
     "guide.overview": "개요",
     "guide.profile": "프로필",
     "profile.soon": "프로필과 리더보드가 곧 추가됩니다.",
+    "mp.title": "멀티플레이어",
+    "mp.soon": "곧 출시 예정",
     "overview": [
       "여섯 개의 숫자를 각각 한 번씩만 사용해 목표 숫자에 도달하거나 0까지 줄이세요.",
       "꼭 정확할 필요는 없어요 — 얼마나 가까운지로 점수가 매겨집니다. 아무도 못 맞히면 가장 가까운 답이 이기고, 동점이면 더 빠른 기록이 이깁니다.",
