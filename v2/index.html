@@ -1325,6 +1325,9 @@ if (window.visualViewport) {
 // (same duration as the green lap); when that finishes, it stays solid red.
 borderPath.addEventListener("animationend", (e) => {
   if (e.animationName === "borderDrain") {
+    // Ignore a stale ring that finishes after you've already left the game (e.g.
+    // solved early then went Home) — only a live game times out.
+    if (!document.body.classList.contains("playing")) return;
     // The 2:00 clock is up (timed games): auto-register the score.
     document.body.classList.add("time-up");
     autoSubmitTimeUp();
