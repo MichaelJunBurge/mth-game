@@ -213,43 +213,51 @@
      land (entering), so the menu icon and timer never show at the same time. */
   body.replay:not(.entering):not(.playing) .nav-icon { opacity: 0.85; pointer-events: auto; }
 
-  /* ---- Multiplayer home page (coming soon) ---- */
-  /* Replaces the target + numbers with a single centred word on the multiplayer
-     carousel page. Tapping the word reveals "Coming soon"; taps to either side
-     still flip the carousel (the word is a <button>, so it's the only thing that
-     doesn't navigate). */
-  .mp-home { display: none; }
-  body.home-multiplayer #target,
-  body.home-multiplayer #slots,
-  body.home-multiplayer .calcwrap { display: none; }
-  body.home-multiplayer .mp-home {
-    display: flex;
+  /* ---- Mode intro pages (Ranked / Multiplayer) ---- */
+  /* Replaces the target + numbers with a single centred word on the Ranked and
+     Multiplayer carousel pages. On Ranked, tapping the word fades it away to
+     reveal the game; on Multiplayer it reveals "Coming soon". Taps to either
+     side still flip the carousel (the word is a <button>, the only non-nav part). */
+  .mode-intro {
+    display: none;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 0.6em;
     min-height: 40dvh;
+    opacity: 1;
+    transition: opacity 0.3s ease;
   }
-  .mp-word {
+  body.mode-intro-on .mode-intro { display: flex; }
+  body.mode-intro-on #target,
+  body.mode-intro-on #slots,
+  body.mode-intro-on .calcwrap { display: none; }
+  .mode-intro.leaving { opacity: 0; }            /* Ranked: fade out to reveal the game */
+  .intro-word {
     background: none;
     border: none;
+    font-family: var(--font);                    /* match the target + the rest of the site */
     color: var(--ink);
     cursor: pointer;
     font-size: calc(var(--size-ui) * 1.5);
-    font-weight: 600;
+    font-weight: 700;
     letter-spacing: 0.01em;
     padding: 0.3em 0.5em;
     transition: opacity 0.15s ease, transform 0.08s;
   }
-  .mp-word:hover { opacity: 0.85; }
-  .mp-word:active { transform: scale(0.96); }
-  .mp-soon {
+  .intro-word:hover { opacity: 0.85; }
+  .intro-word:active { transform: scale(0.96); }
+  .intro-soon {
     color: var(--muted, var(--ink));
+    font-family: var(--font);
     opacity: 0;
     font-size: calc(var(--size-ui) * 0.95);
     transition: opacity 0.25s ease;
   }
-  #mp-home.revealed .mp-soon { opacity: 0.7; }
+  .mode-intro.revealed .intro-soon { opacity: 0.7; }   /* Multiplayer only */
+  /* The game fades in when the Ranked intro is dismissed. */
+  @keyframes reveal-in { from { opacity: 0; } to { opacity: 1; } }
+  .content.reveal-in { animation: reveal-in 0.35s ease; }
 
   /* ---- Pages: sketchpad + calculators carousel ---- */
   /* Sketchpad: full-screen drawing surface with a faint grid. Shown only while
@@ -956,13 +964,13 @@
       <line x1="4" y1="17" x2="20" y2="17" />
     </svg>
   </button>
-  <button id="nav-help" class="nav-icon nav-bottom" aria-label="Profile">
-    <!-- Profile glyph (the old #nav-profile person), sized to read the same as the
-         question mark it replaced. Placeholder until login lands; opens the menu. -->
+  <button id="nav-help" class="nav-icon nav-bottom" aria-label="How to play">
+    <!-- Question mark until login lands; once an account is signed in this swaps
+         to the person/profile glyph (the old #nav-profile, sized to match). -->
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <g transform="translate(12 12) scale(0.92) translate(-12 -12)">
-        <circle vector-effect="non-scaling-stroke" cx="12" cy="8.5" r="3.4" />
-        <path vector-effect="non-scaling-stroke" d="M5.5 19c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5" />
+      <g transform="translate(12 12) scale(1.3) translate(-12 -12)">
+        <path vector-effect="non-scaling-stroke" d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+        <line vector-effect="non-scaling-stroke" x1="12" y1="17" x2="12.01" y2="17" />
       </g>
     </svg>
   </button>
@@ -1003,11 +1011,14 @@
         </div>
       </div>
 
-      <!-- Multiplayer home page: just the word (tap it for "coming soon"). Taps to
-           either side still flip the carousel; shown only when home-multiplayer. -->
-      <div id="mp-home" class="mp-home">
-        <button id="mp-word" class="mp-word" data-i18n="mp.title">Multiplayer</button>
-        <div id="mp-soon" class="mp-soon" data-i18n="mp.soon">Coming soon</div>
+      <!-- Mode intro for the Ranked and Multiplayer carousel pages: just the mode
+           word. On Ranked, tapping it fades away to reveal the game; on
+           Multiplayer it reveals "Coming soon". Taps to either side still flip the
+           carousel (the word is a <button>, so only it doesn't navigate). The word
+           text is set per mode in refreshHomeTimer(). -->
+      <div id="mode-intro" class="mode-intro">
+        <button id="intro-word" class="intro-word">Multiplayer</button>
+        <div id="intro-soon" class="intro-soon" data-i18n="mp.soon">Coming soon</div>
       </div>
     </div>
   </main>
@@ -1150,18 +1161,27 @@ let activeShareCode = null;  // the ?g= code this game came from (for refresh re
 const HOME_ORDER = ["multiplayer", "practice", "ranked"];
 let gameMode = "practice";   // which home page is showing: "practice" | "ranked" | "multiplayer"
 let practiceGame = false;    // the in-progress game has no timer/border (set at start)
+let rankedRevealed = false;  // the Ranked intro word has been tapped -> show the game
 // On the home screen, your own game is "practice" only if that's the chosen mode
 // (a shared game always runs ranked/timed — you're racing the sender's time).
 function homeIsPractice() { return gameMode === "practice" && !sharedGame; }
-// Show the time budget at the top on home: 2:00 for a ranked game, the sender's
-// time-to-beat for a shared game; nothing in practice or on the multiplayer page.
-// Also toggle the multiplayer "coming soon" home page.
+// The Ranked and Multiplayer pages open as a single centred word (an "intro").
+// Ranked drops its intro once tapped (revealing the game); Multiplayer keeps it.
+function introActive() { return gameMode === "multiplayer" || (gameMode === "ranked" && !rankedRevealed); }
+// Show the time budget at the top on home: 2:00 once a ranked game is revealed,
+// the sender's time-to-beat for a shared game; nothing otherwise. Also drive the
+// Ranked/Multiplayer intro word (hidden target + numbers behind it).
 function refreshHomeTimer() {
   const b = document.body;
   const onHome = !b.classList.contains("entering") && !b.classList.contains("playing") &&
                  !b.classList.contains("won") && !b.classList.contains("replay");
-  b.classList.toggle("home-multiplayer", onHome && gameMode === "multiplayer");
-  if (onHome && gameMode === "ranked") {
+  const intro = onHome && introActive();
+  b.classList.toggle("mode-intro-on", intro);
+  if (intro) {
+    document.getElementById("intro-word").textContent = t(gameMode === "ranked" ? "mode.ranked" : "mp.title");
+    document.getElementById("mode-intro").classList.remove("revealed", "leaving");
+  }
+  if (onHome && gameMode === "ranked" && rankedRevealed) {
     timerEl.textContent = fmtTime(TIMED_SEC); // 02:00 budget
     b.classList.add("home-timer");
   } else {
@@ -1172,6 +1192,25 @@ function setMode(m) {
   gameMode = HOME_ORDER.includes(m) ? m : "practice";
   storage.set(MODE_KEY, gameMode);
   refreshHomeTimer();
+}
+// Tapping the "Ranked" intro word fades it away and reveals the game beneath.
+function revealRanked() {
+  const intro = document.getElementById("mode-intro");
+  if (intro.classList.contains("leaving")) return;
+  intro.classList.add("leaving");
+  let done = false;
+  const once = (e) => {
+    if (e && e.propertyName !== "opacity") return;
+    if (done) return;
+    done = true;
+    intro.removeEventListener("transitionend", once);
+    rankedRevealed = true;
+    refreshHomeTimer();                       // drops the intro, shows target + 02:00
+    contentEl.classList.add("reveal-in");
+    setTimeout(() => contentEl.classList.remove("reveal-in"), 400);
+  };
+  intro.addEventListener("transitionend", once);
+  setTimeout(once, 360);                       // fallback if transitionend doesn't fire
 }
 
 /* ---------------- Chevron arrows (identical up/down) ---------------- */
@@ -2193,12 +2232,13 @@ function nextHomeMode(goRight) {
   const i = HOME_ORDER.indexOf(gameMode), n = HOME_ORDER.length;
   return HOME_ORDER[(i + (goRight ? 1 : -1) + n) % n];
 }
-function commitModeSwipe(goRight) { // goRight: tapped/swiped toward the right — go to the right neighbour
+function commitModeSwipe(goRight) { // goRight: go to the right neighbour (new page enters from the right)
   swipeDone = true; animating = true;
-  const W = window.innerWidth, s = goRight ? 1 : -1;
-  document.getElementById("mp-home").classList.remove("revealed"); // reset the coming-soon state
+  const W = window.innerWidth, s = goRight ? -1 : 1; // old page exits AWAY from the new one (it enters from the tapped side)
+  rankedRevealed = false;                            // each landing on Ranked re-shows its intro
+  document.getElementById("mode-intro").classList.remove("revealed", "leaving");
   contentEl.style.transition = "transform 0.16s ease-in";
-  setContentDrag(s * W);                              // current page exits toward the tapped side
+  setContentDrag(s * W);                              // current page exits, the new one comes from the opposite side
   setTimeout(() => {
     setMode(nextHomeMode(goRight));
     contentEl.style.transition = "none";
@@ -2250,7 +2290,7 @@ stageEl.addEventListener("click", (e) => {
     else if (e.clientX > r.right) pageRight();
     else if (document.body.classList.contains("tape-open")) collapseTape(); // centre tap closes the tape
   } else if (canHomeModeSwipe()) {
-    commitModeSwipe(e.clientX > window.innerWidth / 2); // right half -> right neighbour, left half -> left
+    commitModeSwipe(e.clientX > window.innerWidth / 2); // tap right -> right neighbour enters from the right (like the game pages)
   }
 });
 stageEl.addEventListener("pointermove", (e) => {
@@ -2272,7 +2312,7 @@ stageEl.addEventListener("pointermove", (e) => {
     homeSwiping = true;
     contentEl.style.transition = "none";
     setContentDrag(Math.max(-window.innerWidth, Math.min(window.innerWidth, dx))); // 1:1 follow
-    if (Math.abs(dx) >= commitDist()) commitModeSwipe(dx > 0); // drag right -> right neighbour
+    if (Math.abs(dx) >= commitDist()) commitModeSwipe(dx < 0); // drag left -> right neighbour (content follows the finger)
   } else if (swipeAxis === "v") {
     // drag the help/menu sheet in from its edge, following the finger
     dragSheet(vDir, (vDir === 1 ? -dy : dy) / window.innerHeight);
@@ -2879,6 +2919,7 @@ function applyLang() {
   const sub = document.getElementById("menu-submit");
   if (sub.style.display !== "none") sub.textContent = allUsedUp() ? t("submit") : t("quit");
   renderHelp();
+  refreshHomeTimer(); // re-set the Ranked/Multiplayer intro word in the new language
   if (sharedGame) refreshBeat();
   if (document.body.classList.contains("tour-on")) renderTourStep();
 }
@@ -3056,9 +3097,13 @@ function restartShared() {
 timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-help").addEventListener("click", openGuide);
-// Multiplayer home page: tapping the word reveals "Coming soon" (it's a button so
-// it doesn't trigger carousel navigation the way the surrounding area does).
-document.getElementById("mp-word").addEventListener("click", () => document.getElementById("mp-home").classList.add("revealed"));
+// Mode intro word (it's a button, so tapping it doesn't flip the carousel the way
+// the surrounding area does): Ranked fades away to reveal the game; Multiplayer
+// reveals "Coming soon".
+document.getElementById("intro-word").addEventListener("click", () => {
+  if (gameMode === "ranked") revealRanked();
+  else document.getElementById("mode-intro").classList.add("revealed");
+});
 document.getElementById("menu-lang").addEventListener("click", toggleLang);
 
 // Drag-to-close on the overlays: the open sheet follows the finger back toward
