@@ -113,7 +113,7 @@
     100%       { stroke: var(--red); }
   }
 
-  /* Timer — sits muted at 20%; clickable during play to open the menu. */
+  /* Timer — muted while the clock runs; clickable during play to open the menu. */
   .timer {
     position: fixed;
     top: 5vh;
@@ -128,15 +128,17 @@
     z-index: 40;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: opacity 0.3s, color 0.3s;
   }
-  /* The timer (a stopwatch) shows during entering/playing in BOTH modes and
-     during a shared intro. Practice just drops the budget on the home screen
-     and the draining ring — the clock itself still runs (and opens the menu). */
+  /* The timer (a stopwatch) shows during entering/playing in BOTH modes. On the
+     timed home it shows the 02:00 budget. NOT shown during the shared-intro roll
+     (the menu icon is up then) — it takes over once the numbers land (entering). */
   body.entering .timer,
   body.playing .timer,
-  body.replay .timer,
-  body.home-timer .timer { opacity: 1; } /* home-timer = the budget preview (02:00 / time-to-beat) */
+  body.home-timer .timer { opacity: 1; }
+  /* Full-strength on the home screen (the 02:00 budget), fading to muted once
+     the clock actually starts. */
+  body.home-timer .timer { color: var(--ink); }
   /* On home in timed mode the 02:00 sits where the hamburger would — so it
      doubles as the menu button (tap it, like the timer during play) and the
      hamburger hides to avoid overlapping it. */
@@ -177,9 +179,10 @@
   body.entering .nav-icon,
   body.playing .nav-icon,
   body.won .nav-icon { opacity: 0; pointer-events: none; }
-  /* During a shared-intro replay the hamburger + profile stay available (so a
-     new player can read Help before the puzzle starts) — even while "entering". */
-  body.replay .nav-icon { opacity: 0.85; pointer-events: auto; }
+  /* During the shared-intro roll/draw (before the entrance) the icons stay up so
+     a new player can read Help — but they hand off to the timer once the numbers
+     land (entering), so the menu icon and timer never show at the same time. */
+  body.replay:not(.entering):not(.playing) .nav-icon { opacity: 0.85; pointer-events: auto; }
 
   /* ---- Pages: sketchpad + calculators carousel ---- */
   /* Sketchpad: full-screen drawing surface with a faint grid. Shown only while
@@ -687,10 +690,11 @@
   .win-btn:hover { transform: scale(1.12); }
   .win-btn:active { transform: scale(0.94); }
 
-  /* "Beat" banner — shown under the timer when playing a shared puzzle */
+  /* "Beat" banner (the green time/score to beat on a shared puzzle). JS-centred
+     vertically in the gap between the timer and the target so it never overlaps. */
   .beat {
     position: fixed;
-    top: 9vh;
+    top: 9vh; /* JS overrides via positionBeat() */
     left: 0;
     right: 0;
     text-align: center;
@@ -701,12 +705,13 @@
     color: var(--green);
     z-index: 40;
     pointer-events: none;
+    transform: translateY(-50%);
     opacity: 0;
     transition: opacity 0.3s;
   }
-  /* The "Beat X" banner is for play (top timer shows YOUR time then, the banner
-     the goal). During the intro the time-to-beat sits up top instead. */
-  body.playing:not(.practice) .beat.show { opacity: 1; }
+  /* Appears once the numbers land (entering) and stays through play. */
+  body.entering .beat.show,
+  body.playing .beat.show { opacity: 1; }
 
   .toast {
     position: fixed;
@@ -898,8 +903,12 @@
   </button>
   <button id="nav-help" class="nav-icon nav-bottom" aria-label="How to play">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
+      <!-- Scaled up ~1.3x (non-scaling-stroke keeps the line weight matching the
+           hamburger) so the question mark reads the same size as it. -->
+      <g transform="translate(12 12) scale(1.3) translate(-12 -12)">
+        <path vector-effect="non-scaling-stroke" d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+        <line vector-effect="non-scaling-stroke" x1="12" y1="17" x2="12.01" y2="17" />
+      </g>
     </svg>
   </button>
 
@@ -1091,8 +1100,7 @@ function refreshHomeTimer() {
   const onHome = !b.classList.contains("entering") && !b.classList.contains("playing") &&
                  !b.classList.contains("won") && !b.classList.contains("replay");
   if (onHome && !homeIsPractice()) {
-    const solvedShare = sharedGame && sharedGame.outcome && sharedGame.outcome.solved;
-    timerEl.textContent = fmtTime(solvedShare ? sharedGame.outcome.timeSec : TIMED_SEC);
+    timerEl.textContent = fmtTime(TIMED_SEC); // 02:00 budget
     b.classList.add("home-timer");
   } else {
     b.classList.remove("home-timer");
@@ -1256,7 +1264,16 @@ function layoutBorder() {
     `L${inset} ${h - inset} L${inset} ${inset} Z`
   );
 }
-function onViewportResize() { layoutBorder(); sizeSketch(); positionPageDel(); sizeConfetti(); }
+// Centre the green "Beat X" banner vertically in the gap between the timer and
+// the target, so it never overlaps either (or the menu icon).
+function positionBeat() {
+  if (!beatEl.classList.contains("show")) return;
+  const t = timerEl.getBoundingClientRect();
+  const tg = targetEl.getBoundingClientRect();
+  if (!tg.height) return;
+  beatEl.style.top = Math.round((t.bottom + tg.top) / 2) + "px";
+}
+function onViewportResize() { layoutBorder(); sizeSketch(); positionPageDel(); positionBeat(); sizeConfetti(); }
 window.addEventListener("resize", onViewportResize);
 // Mobile: the visible area changes as the address bar shows/hides — keep the
 // ring framed to it rather than a stale window.innerHeight.
@@ -1528,6 +1545,7 @@ function nextBracket() {
 }
 
 function renderDisplay() {
+  clearTimeout(errorFlashTimer); // a real render cancels any pending error flash
   if (expr === "") {
     displayValEl.textContent = "00";
     displayEl.className = "display empty";
@@ -1649,17 +1667,24 @@ function showError() {
   displayEl.className = "display error";
 }
 
-// A fraction was produced: flag the error and wipe the attempted line — the
-// numbers placed in it return to the board (unused), so you can try again.
+// A fraction was produced: flag the error and roll the line back to the running
+// sum it started from (freeing the numbers/operators added after it). A fresh
+// line with no sum yet just empties. The numbers freed return to the board.
+let errorFlashTimer = null;
 function decimalError() {
   available.forEach((e) => { e.tentative = false; });
-  lineEntry = null;
-  lineSum = null;
-  expr = "";
+  if (lineSum !== null) {
+    expr = String(lineSum);   // back to just the sum
+  } else {
+    expr = "";                // fresh line had no sum -> empty
+    lineEntry = null;
+  }
   refreshSlots();
   renderGenerated();
-  showError(); // "Error" stays until the next number/operator press
+  showError();                // flash "Error", then reveal the restored line
   saveState();
+  clearTimeout(errorFlashTimer);
+  errorFlashTimer = setTimeout(() => { if (displayEl.classList.contains("error")) renderDisplay(); }, 900);
 }
 
 /* ---------------- Pages (sketchpad + calculators) ---------------- */
@@ -2273,6 +2298,7 @@ function startPlaying() {
   startTimer();                            // the clock runs in both modes
   if (!practiceGame) startBorderDrain(0);  // only timed drains the ring
   positionPageDel();
+  positionBeat();
   saveState();
 }
 
@@ -2692,6 +2718,8 @@ function restoreState(s) {
         startBorderDrain(elapsed);
       }
     }
+    positionPageDel();
+    positionBeat();
     return true;
   }
 
@@ -2890,6 +2918,7 @@ function refreshBeat() {
   if (!sharedGame) return;
   const o = sharedGame.outcome;
   beatEl.textContent = t("beat", { x: o.solved ? fmtTime(o.timeSec) : o.score });
+  positionBeat();
 }
 function fillHelp(boxId, key) {
   const box = document.getElementById(boxId);
@@ -3020,7 +3049,6 @@ function restartShared() {
   sharedGame = sg;
   practiceGame = false;
   borderDurationSec = 120; // receiver always gets the full 2:00
-  timerEl.textContent = fmtTime(sg.outcome && sg.outcome.solved ? (Number(sg.outcome.timeSec) || 120) : 120);
   document.body.classList.remove("home-timer");
   refreshBeat();
   beatEl.classList.add("show");
@@ -3249,10 +3277,8 @@ function loadFromURL() {
       };
       borderDurationSec = 120; // receiver always gets the full 2:00 (red at the sender's time)
       practiceGame = false; // shared games are always timed
-      // Time-to-beat up top during the intro: the sender's solve time, else 2:00.
-      timerEl.textContent = fmtTime(data.o.solved ? (Number(data.o.timeSec) || 120) : 120);
       document.body.classList.remove("home-timer");
-      refreshBeat();
+      refreshBeat();              // the green "Beat X" banner (time/score to beat)
       beatEl.classList.add("show");
     } else {
       sharedGame = null;
@@ -3435,11 +3461,12 @@ function playIntro(t, nums, draws) {
     initPages(); layoutBorder(); resetBorder();
     timerEl.textContent = "00:00";
     document.body.classList.remove("time-up"); document.body.classList.add("entering");
+    positionBeat();
   } });
-  ev.push({ t: beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); } });
-  ev.push({ t: beat + HOLD + RISE, fn: () => { document.body.classList.add("playing"); calcEl.style.maxHeight = "80vh"; } });
+  ev.push({ t: beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); positionBeat(); } });
+  ev.push({ t: beat + HOLD + RISE, fn: () => { document.body.classList.add("playing"); calcEl.style.maxHeight = "80vh"; positionBeat(); } });
   ev.push({ t: beat + HOLD + RISE + FADE, fn: () => {
-    startTimer(); startBorderDrain(0); positionPageDel();
+    startTimer(); startBorderDrain(0); positionPageDel(); positionBeat();
     replaying = false; document.body.classList.remove("replay");
     saveState();
   } });
