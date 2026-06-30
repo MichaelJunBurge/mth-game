@@ -1604,6 +1604,8 @@ function evaluate() {
   if (typeof value !== "number" || !isFinite(value)) return showError();
 
   const rounded = Math.round(value * 1e6) / 1e6;
+  // No fractions allowed: a non-whole result is an error (= and auto-= alike).
+  if (!Number.isInteger(rounded)) return decimalError();
 
   // The operands are exactly: the running result (if we continued from one)
   // plus every number tentatively placed in this equation.
@@ -1645,6 +1647,19 @@ function evaluate() {
 function showError() {
   displayValEl.textContent = "Error";
   displayEl.className = "display error";
+}
+
+// A fraction was produced: flag the error and wipe the attempted line — the
+// numbers placed in it return to the board (unused), so you can try again.
+function decimalError() {
+  available.forEach((e) => { e.tentative = false; });
+  lineEntry = null;
+  lineSum = null;
+  expr = "";
+  refreshSlots();
+  renderGenerated();
+  showError(); // "Error" stays until the next number/operator press
+  saveState();
 }
 
 /* ---------------- Pages (sketchpad + calculators) ---------------- */
