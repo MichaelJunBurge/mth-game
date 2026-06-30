@@ -1060,6 +1060,9 @@
 import { SLOT_COUNT, freshLargeBag, freshSmallBag, randInt } from "./src/core/numbers.js";
 import { evalExpression } from "./src/core/evaluate.js";
 import { computeScore as coreComputeScore, goalFor, distance as coreDistance, verdict } from "./src/core/scoring.js";
+// Cross-cutting constants + the localStorage wrapper.
+import { SAVE_KEY, THEME_KEY, AUTOEQ_KEY, AUTOSIGN_KEY, LANG_KEY, MODE_KEY, TIMED_SEC, MAX_CALCS, THEME_BG } from "./src/config/constants.js";
+import { storage } from "./src/services/storage.js";
 
 /* ---------------- Number pools ---------------- */
 let largeBag = freshLargeBag();
@@ -1112,10 +1115,8 @@ let available = [];
 let lastResult = null;     // most recent calculator answer (the "reached" value)
 let lastOutcome = null;    // this player's result for the just-finished game
 let sharedGame = null;     // when set, we're playing a puzzle someone sent us
-let borderDurationSec = 120; // how long the green bar takes to go around
+let borderDurationSec = TIMED_SEC; // how long the green bar takes to go around
 let activeShareCode = null;  // the ?g= code this game came from (for refresh restore)
-const MODE_KEY = "numbersRound.mode.v2";
-const TIMED_SEC = 120;       // own timed game: 2:00 budget (the green lap)
 let gameMode = "timed";      // home preference for your own games: "timed" | "practice"
 let practiceGame = false;    // the in-progress game has no timer/border (set at start)
 // On the home screen, your own game is "practice" only if that's the chosen mode
@@ -1136,7 +1137,7 @@ function refreshHomeTimer() {
 }
 function setMode(m) {
   gameMode = m === "practice" ? "practice" : "timed";
-  try { localStorage.setItem(MODE_KEY, gameMode); } catch (e) {}
+  storage.set(MODE_KEY, gameMode);
   refreshHomeTimer();
 }
 
@@ -1448,8 +1449,7 @@ let undoStack = [];        // full-state snapshots so clear-once can undo
 // Pages: a sketchpad (always leftmost) plus one or more independent calculators
 // over the same target + six numbers. The live calculator globals above ARE the
 // active page's working set; switching pages snapshots the old one and loads the
-// new. pageIndex 0 = sketchpad; 1..N = calcPages[pageIndex-1].
-const MAX_CALCS = 8;
+// new. pageIndex 0 = sketchpad; 1..N = calcPages[pageIndex-1]. (MAX_CALCS imported)
 let calcPages = [];        // per-calculator state snapshots
 let padStrokes = [];       // sketchpad strokes; each is an array of {x,y} in 0..1
 let pageIndex = 1;
@@ -2437,7 +2437,7 @@ function backToHome() {
   lastResult = null;
   lastOutcome = null;
   sharedGame = null;
-  borderDurationSec = 120;
+  borderDurationSec = TIMED_SEC;
   activeShareCode = null;
   beatEl.classList.remove("show");
   renderHistory();
@@ -2640,7 +2640,6 @@ function stopConfetti() {
 }
 
 /* ---------------- Persistence (survive a page refresh) ---------------- */
-const SAVE_KEY = "numbersRound.save.v2"; // distinct from v1 (same origin)
 
 function currentPhase() {
   if (document.body.classList.contains("won")) return "won";
@@ -2652,7 +2651,7 @@ function currentPhase() {
 function saveState() {
   const phase = currentPhase();
   if (phase === "home") {
-    try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+    storage.remove(SAVE_KEY);
     return;
   }
   if (pageIndex >= 1) syncActiveCalc();
@@ -2673,15 +2672,15 @@ function saveState() {
     shareCode: activeShareCode,
     introDraws: introDraws,   // so the shareable intro survives a page reload
   };
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot)); } catch (e) {}
+  storage.setJSON(SAVE_KEY, snapshot);
 }
 
 function readSave() {
-  try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; }
+  return storage.getJSON(SAVE_KEY);
 }
 
 function clearSave() {
-  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+  storage.remove(SAVE_KEY);
 }
 
 // Rebuild a saved game so a refresh lands back where you were.
@@ -2719,7 +2718,7 @@ function restoreState(s) {
   lastOutcome = s.lastOutcome || null;
   sharedGame = s.sharedGame || null;
   practiceGame = !!s.practiceGame && !sharedGame;
-  borderDurationSec = 120; // fixed 2:00 for everyone now
+  borderDurationSec = TIMED_SEC; // fixed 2:00 for everyone now
   startEpoch = s.startEpoch || Date.now();
   activeShareCode = s.shareCode || null;
 
@@ -2863,15 +2862,12 @@ winShareBtn.addEventListener("click", sharePuzzle);
 
 /* ---------------- Pause menu + theme ---------------- */
 const menuEl = document.getElementById("menu");
-const THEME_KEY = "numbersRound.theme.v2";
-const AUTOEQ_KEY = "numbersRound.autoeq.v2";
-const AUTOSIGN_KEY = "numbersRound.autosign.v2";
+// (THEME_KEY / AUTOEQ_KEY / AUTOSIGN_KEY imported from config/constants.js)
 // Signs that can be auto-placed between two consecutive numbers.
 const SIGN_CYCLE = ["x", "+", "-", "÷", "^"];
 const SIGN_LABEL = { "x": "×", "+": "+", "-": "−", "÷": "÷", "^": "^" };
 
 /* ---------------- Language (English / 한국어) ---------------- */
-const LANG_KEY = "numbersRound.lang.v2";
 const I18N = {
   en: {
     "menu.resume": "Resume", "menu.reset": "Reset", "menu.home": "Home",
@@ -2987,7 +2983,7 @@ function applyLang() {
 }
 function toggleLang() {
   lang = lang === "en" ? "ko" : "en";
-  try { localStorage.setItem(LANG_KEY, lang); } catch (e) {}
+  storage.set(LANG_KEY, lang);
   applyLang();
 }
 function refreshBeat() {
@@ -3022,14 +3018,14 @@ function applyTheme(theme) {
   const meta = document.createElement("meta");
   meta.setAttribute("name", "theme-color");
   meta.id = "theme-color-meta";
-  meta.setAttribute("content", dark ? "#14161a" : "#ffffff");
+  meta.setAttribute("content", dark ? THEME_BG.dark : THEME_BG.light);
   document.head.appendChild(meta);
   document.getElementById("menu-theme").textContent = dark ? t("theme.light") : t("theme.dark");
 }
 function toggleTheme() {
   const dark = !document.body.classList.contains("dark");
   applyTheme(dark ? "dark" : "light");
-  try { localStorage.setItem(THEME_KEY, dark ? "dark" : "light"); } catch (e) {}
+  storage.set(THEME_KEY, dark ? "dark" : "light");
 }
 
 function applyAutoEqual(on) {
@@ -3038,7 +3034,7 @@ function applyAutoEqual(on) {
 }
 function toggleAutoEqual() {
   applyAutoEqual(!autoEqual);
-  try { localStorage.setItem(AUTOEQ_KEY, autoEqual ? "on" : "off"); } catch (e) {}
+  storage.set(AUTOEQ_KEY, autoEqual ? "on" : "off");
 }
 
 function applyAutoSign(sign) {
@@ -3048,7 +3044,7 @@ function applyAutoSign(sign) {
 function cycleAutoSign() {
   const next = SIGN_CYCLE[(SIGN_CYCLE.indexOf(autoSign) + 1) % SIGN_CYCLE.length];
   applyAutoSign(next);
-  try { localStorage.setItem(AUTOSIGN_KEY, autoSign); } catch (e) {}
+  storage.set(AUTOSIGN_KEY, autoSign);
 }
 
 let menuPausedElapsed = null;
@@ -3134,7 +3130,7 @@ function restartShared() {
   activeShareCode = code;
   sharedGame = sg;
   practiceGame = false;
-  borderDurationSec = 120; // receiver always gets the full 2:00
+  borderDurationSec = TIMED_SEC; // receiver always gets the full 2:00
   document.body.classList.remove("home-timer");
   refreshBeat();
   beatEl.classList.add("show");
@@ -3362,14 +3358,14 @@ function loadFromURL() {
           working: data.w || [],
         },
       };
-      borderDurationSec = 120; // a shared TIMED game still gives the receiver the full 2:00
+      borderDurationSec = TIMED_SEC; // a shared TIMED game still gives the receiver the full 2:00
       practiceGame = false; // the receiver isn't in their own practice mode (sharedGame.practice drives the ring)
       document.body.classList.remove("home-timer");
       refreshBeat();              // the green "Beat X" banner (time/score to beat)
       beatEl.classList.add("show");
     } else {
       sharedGame = null;
-      borderDurationSec = 120;
+      borderDurationSec = TIMED_SEC;
       beatEl.classList.remove("show");
     }
   }
@@ -3613,11 +3609,11 @@ renderHistory();
 setArrowsEnabled(false); // can't draw numbers until a target is generated
 layoutBorder();
 sizeSketch();
-lang = (localStorage.getItem(LANG_KEY) === "ko") ? "ko" : "en";
-gameMode = (localStorage.getItem(MODE_KEY) === "practice") ? "practice" : "timed";
-applyTheme(localStorage.getItem(THEME_KEY) || "light");
-applyAutoEqual((localStorage.getItem(AUTOEQ_KEY) || "on") !== "off");
-applyAutoSign(localStorage.getItem(AUTOSIGN_KEY) || "x");
+lang = (storage.get(LANG_KEY) === "ko") ? "ko" : "en";
+gameMode = (storage.get(MODE_KEY) === "practice") ? "practice" : "timed";
+applyTheme(storage.get(THEME_KEY) || "light");
+applyAutoEqual((storage.get(AUTOEQ_KEY) || "on") !== "off");
+applyAutoSign(storage.get(AUTOSIGN_KEY) || "x");
 applyLang();
 refreshHomeTimer(); // show 02:00 on the home screen in timed mode
 
