@@ -2671,6 +2671,7 @@ function saveState() {
     largeBag: largeBag,
     smallBag: smallBag,
     shareCode: activeShareCode,
+    introDraws: introDraws,   // so the shareable intro survives a page reload
   };
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot)); } catch (e) {}
 }
@@ -2710,6 +2711,11 @@ function restoreState(s) {
 
   if (s.largeBag) largeBag = s.largeBag.slice();
   if (s.smallBag) smallBag = s.smallBag.slice();
+  // Restore the intro recording so a share made after a reload still replays the
+  // roll + draws. Re-base introT0 to the last recorded draw so any numbers drawn
+  // after the reload continue smoothly (no giant gap from the time away).
+  introDraws = Array.isArray(s.introDraws) ? s.introDraws.map((d) => ({ i: d.i, t: d.t })) : [];
+  introT0 = Date.now() - introDraws.reduce((m, d) => Math.max(m, d.t || 0), 0);
   lastOutcome = s.lastOutcome || null;
   sharedGame = s.sharedGame || null;
   practiceGame = !!s.practiceGame && !sharedGame;
@@ -3640,6 +3646,13 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
       practiceGame = false; startPlaying();
     },
     play(idx) { playNumber(available.find((e) => e.slotIndex === idx && !e.tentative)); },
+    rollTarget, drawInto,
+    intro() { return { introT0, introDraws: introDraws.slice(), isRolling: isRollingTarget }; },
+    sharePayload() {
+      // mirrors sharePuzzle()'s payload (the part that matters for the intro)
+      return { pr: (sharedGame ? sharedGame.practice : practiceGame) ? 1 : 0,
+        intro: introDraws.slice(), introLen: introDraws.length };
+    },
     state() {
       return { expr, lineSum, lastResult, display: displayValEl.textContent, displayCls: displayEl.className,
         outcome: lastOutcome, slotUsed: slotUsed.slice(), currentTarget };
