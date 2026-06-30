@@ -88,6 +88,9 @@
     background: var(--bg);
     color: var(--ink);
     font-family: var(--font);
+    /* House style: everything lowercase. Opt an element out with
+       `text-transform: none` when a label needs its own casing. */
+    text-transform: lowercase;
     -webkit-font-smoothing: antialiased;
     transition: background 0.25s ease, color 0.25s ease;
     /* No double-tap-to-zoom (it fired when tapping the clear key quickly). */
@@ -99,6 +102,9 @@
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
   }
+  /* Form controls don't inherit text-transform on their own — pull the house
+     lowercase through so buttons/inputs match the rest of the text. */
+  button, input, select, textarea { text-transform: inherit; }
   button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 
   /* Green perimeter indicator — one continuous bar, browser-animated */
@@ -248,10 +254,11 @@
   .intro-word:hover { opacity: 0.85; }
   .intro-word:active { transform: scale(0.96); }
   /* Each letter flickers random letters then locks left-to-right, like the target
-     reels. Roboto Mono is monospace, so the word width stays put while it spins. */
-  .intro-letter { display: inline-block; }
+     reels. Roboto Mono is monospace, so the word width stays put while it spins.
+     Kept inline (not inline-block) and with no transform so the letters don't jump
+     up/down as descenders cycle through — they only settle in colour when locked. */
+  .intro-letter { transition: color 0.12s ease; }
   .intro-letter.spinning { color: var(--dim); }
-  .intro-letter.lock { animation: pop 0.28s ease; }
   .intro-soon {
     color: var(--muted, var(--ink));
     font-family: var(--font);
@@ -1238,7 +1245,10 @@ function setIntroWord(text) { clearIntroAnim(); buildIntroLetters(text); } // st
 function animateIntroWord(text) {
   clearIntroAnim();
   const spans = buildIntroLetters(text);
-  const rnd = () => String.fromCharCode(65 + randInt(0, 25));
+  const rnd = () => String.fromCharCode(97 + randInt(0, 25)); // lowercase a–z while spinning
+  // The page slide is ~0.22s; keep the letters running for ~1s AFTER it lands,
+  // then stop them left-to-right.
+  const START = 1200;
   spans.forEach((s, i) => {
     s.classList.add("spinning");
     s.textContent = rnd();
@@ -1249,7 +1259,7 @@ function animateIntroWord(text) {
       s.textContent = text[i];
       s.classList.remove("spinning");
       s.classList.add("lock");
-    }, 240 + i * 70));
+    }, START + i * 70));
   });
 }
 function introWordText() { return t(gameMode === "ranked" ? "mode.ranked" : "mp.title"); }
