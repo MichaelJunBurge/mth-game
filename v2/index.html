@@ -201,8 +201,8 @@
     transition: opacity 0.3s ease, transform 0.08s;
   }
   .nav-icon svg {
-    width: calc(var(--size-ui) * 1.7);
-    height: calc(var(--size-ui) * 1.7);
+    width: calc(var(--size-ui) * 1.36);  /* 20% smaller than 1.7 — closer to the text weight */
+    height: calc(var(--size-ui) * 1.36);
     display: block;
   }
   .nav-icon:hover { opacity: 1; }
@@ -1246,9 +1246,9 @@ function animateIntroWord(text) {
   clearIntroAnim();
   const spans = buildIntroLetters(text);
   const rnd = () => String.fromCharCode(97 + randInt(0, 25)); // lowercase a–z while spinning
-  // The page slide is ~0.22s; keep the letters running for ~1s AFTER it lands,
-  // then stop them left-to-right.
-  const START = 1200;
+  // The page slide is ~0.22s; keep the letters running ~half a second AFTER it
+  // lands, then stop them left-to-right.
+  const START = 600;
   spans.forEach((s, i) => {
     s.classList.add("spinning");
     s.textContent = rnd();
