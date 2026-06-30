@@ -106,6 +106,11 @@
     from { stroke-dashoffset: 0; }     /* full perimeter */
     to   { stroke-dashoffset: -1000; } /* empty, draining clockwise */
   }
+  /* Grows clockwise from empty to full (shared practice games). */
+  @keyframes borderFill {
+    from { stroke-dashoffset: 1000; }  /* empty */
+    to   { stroke-dashoffset: 0; }     /* full */
+  }
   /* Runs alongside the drain: holds green, then snaps to red at the end of its
      own (shorter) duration — the halfway mark on a 2:00 timed game. */
   @keyframes borderHalf {
@@ -786,6 +791,16 @@
   /* Submit goes green once all six numbers are used (a "you can stop" cue). */
   .menu-btn.ready { color: var(--green); }
   .guide-back { color: var(--red); } /* the Back text buttons in the help views */
+  /* End game: red, pinned to the bottom of the menu; turns green once every
+     number is used (then it's a real Submit). */
+  #menu-submit {
+    color: var(--red);
+    position: absolute;
+    left: 0; right: 0; margin: 0;
+    bottom: calc(7dvh + env(safe-area-inset-bottom, 0px));
+    text-align: center;
+  }
+  #menu-submit.ready { color: var(--green); }
 
   /* Help (?) overlay — a bottom sheet that slides UP over the stationary game. */
   .sheet {
@@ -1273,6 +1288,18 @@ function positionBeat() {
   if (!tg.height) return;
   beatEl.style.top = Math.round((t.bottom + tg.top) / 2) + "px";
 }
+// Keep the banner glued to the target while it rises into play, so it travels up
+// at the same rate (rather than snapping) — runs for the rise's duration.
+let beatTrackRAF = null;
+function trackBeatFor(ms) {
+  cancelAnimationFrame(beatTrackRAF);
+  const end = Date.now() + ms;
+  const step = () => {
+    positionBeat();
+    if (Date.now() < end) beatTrackRAF = requestAnimationFrame(step); else beatTrackRAF = null;
+  };
+  beatTrackRAF = requestAnimationFrame(step);
+}
 function onViewportResize() { layoutBorder(); sizeSketch(); positionPageDel(); positionBeat(); sizeConfetti(); }
 window.addEventListener("resize", onViewportResize);
 // Mobile: the visible area changes as the address bar shows/hides — keep the
@@ -1285,9 +1312,24 @@ if (window.visualViewport) {
 // (same duration as the green lap); when that finishes, it stays solid red.
 borderPath.addEventListener("animationend", (e) => {
   if (e.animationName === "borderDrain") {
-    // The 2:00 clock is up (own and shared): auto-register the score.
+    // The 2:00 clock is up (timed games): auto-register the score.
     document.body.classList.add("time-up");
     autoSubmitTimeUp();
+  } else if (e.animationName === "borderFill") {
+    // Shared-practice grow: green lap done -> grow a red lap -> lock solid red.
+    if (!borderRedGrow) {
+      borderRedGrow = true;
+      borderPath.style.animation = "none";
+      void borderPath.offsetWidth;
+      borderPath.style.stroke = "var(--red)";
+      borderPath.style.strokeDashoffset = "";
+      borderPath.style.animationDelay = "0s";
+      borderPath.style.animation = "borderFill " + borderGrowSec + "s linear forwards";
+    } else {
+      borderPath.style.animation = "none";
+      borderPath.style.stroke = "var(--red)";
+      borderPath.style.strokeDashoffset = "0"; // solid full red
+    }
   }
 });
 // Time's up: score the calculator page you're on (or, from the sketchpad, the
@@ -1321,6 +1363,24 @@ function startBorderDrain(delaySec) {
     "borderDrain " + borderDurationSec + "s linear forwards, borderHalf " + redSec + "s linear forwards";
   borderPath.style.animationDelay = "-" + d + "s, -" + d + "s";
 }
+// Shared-practice grow: a green ring grows from empty to full over the sender's
+// solve time, then a red ring grows over the same span, then locks solid red.
+let borderGrowSec = 60, borderRedGrow = false;
+function startBorderGrow(delaySec) {
+  const d = delaySec || 0;
+  borderGrowSec = Math.max(1, Math.round((sharedGame && sharedGame.outcome && sharedGame.outcome.timeSec) || 60));
+  borderRedGrow = false;
+  borderPath.style.stroke = "";          // green
+  borderPath.style.strokeDashoffset = "";
+  borderPath.style.animation = "borderFill " + borderGrowSec + "s linear forwards";
+  borderPath.style.animationDelay = "-" + d + "s";
+}
+// Dispatch the right ring for the game: timed drains, shared-practice grows,
+// own practice has none.
+function startBorder(delaySec) {
+  if (sharedGame && sharedGame.practice) startBorderGrow(delaySec);
+  else if (isTimedGame()) startBorderDrain(delaySec);
+}
 
 /* ---------------- Timer text ---------------- */
 let timerInt = null;
@@ -1333,12 +1393,20 @@ function fmtTime(totalSeconds) {
   return mm + ":" + ss;
 }
 
+// A "timed" game counts DOWN from the 2:00 cap, drains the ring, and auto-submits.
+// Practice (own or shared) is an open-ended stopwatch that counts UP with no cap.
+function isTimedGame() {
+  if (sharedGame) return !sharedGame.practice;
+  return !practiceGame;
+}
+function timerText() {
+  const elapsed = (Date.now() - startEpoch) / 1000;
+  return isTimedGame() ? fmtTime(Math.max(0, borderDurationSec - elapsed)) : fmtTime(elapsed);
+}
 function runTimerLoop() {
-  timerEl.textContent = fmtTime((Date.now() - startEpoch) / 1000);
+  timerEl.textContent = timerText();
   clearInterval(timerInt);
-  timerInt = setInterval(() => {
-    timerEl.textContent = fmtTime((Date.now() - startEpoch) / 1000);
-  }, 250);
+  timerInt = setInterval(() => { timerEl.textContent = timerText(); }, 250);
 }
 
 function startTimer() {
@@ -1667,17 +1735,25 @@ function showError() {
   displayEl.className = "display error";
 }
 
-// A fraction was produced: flag the error and roll the line back to the running
-// sum it started from (freeing the numbers/operators added after it). A fresh
-// line with no sum yet just empties. The numbers freed return to the board.
+// A fraction was produced: flag the error and roll the line back to where it
+// started — to the running sum if it continued from one, else to just the first
+// number placed on a fresh line (freeing the numbers/operators added after it).
 let errorFlashTimer = null;
 function decimalError() {
-  available.forEach((e) => { e.tentative = false; });
   if (lineSum !== null) {
+    available.forEach((e) => { e.tentative = false; });
     expr = String(lineSum);   // back to just the sum
   } else {
-    expr = "";                // fresh line had no sum -> empty
-    lineEntry = null;
+    // Fresh line: keep the first number placed, free the rest.
+    const m = expr.match(/^\d+/);
+    const firstVal = m ? Number(m[0]) : NaN;
+    let kept = false;
+    available.forEach((e) => {
+      if (!kept && e.tentative && e.value === firstVal) kept = true; // leave this one placed
+      else e.tentative = false;
+    });
+    expr = kept ? String(firstVal) : "";
+    if (!kept) lineEntry = null;
   }
   refreshSlots();
   renderGenerated();
@@ -2296,7 +2372,7 @@ function startPlaying() {
   showCalcInstant();
   collapseArrowsInstant();
   startTimer();                            // the clock runs in both modes
-  if (!practiceGame) startBorderDrain(0);  // only timed drains the ring
+  startBorder(0);                          // timed drains, shared-practice grows, own practice none
   positionPageDel();
   positionBeat();
   saveState();
@@ -2317,7 +2393,7 @@ function beginEntrance() {
   initPages();
   layoutBorder();
   resetBorder();                 // full, static green ring
-  timerEl.textContent = "00:00"; // shown but not counting yet
+  timerEl.textContent = isTimedGame() ? fmtTime(TIMED_SEC) : "00:00"; // countdown vs stopwatch start
   document.body.classList.remove("time-up");
   document.body.classList.add("entering");
   saveState();
@@ -2335,7 +2411,7 @@ function beginEntrance() {
       calcEl.style.maxHeight = "80vh";             // allow the tape to expand
       entranceTimers.push(setTimeout(() => {
         startTimer();                            // the clock runs in both modes
-        if (!practiceGame) startBorderDrain(0);  // only timed drains the ring
+        startBorder(0);                          // timed drains, shared-practice grows
         positionPageDel();
         saveState();
       }, FADE_MS));
@@ -2346,6 +2422,7 @@ function beginEntrance() {
 function backToHome() {
   entranceTimers.forEach(clearTimeout);
   entranceTimers = [];
+  cancelAnimationFrame(beatTrackRAF);
   stopRoll();
   stopDraws();
   pbStop();
@@ -2705,8 +2782,8 @@ function restoreState(s) {
     showCalcInstant();
     collapseArrowsInstant();
     runTimerLoop(); // the clock runs in both modes
-    if (!practiceGame) {
-      const elapsed = (Date.now() - startEpoch) / 1000;
+    const elapsed = (Date.now() - startEpoch) / 1000;
+    if (isTimedGame()) {
       if (elapsed >= borderDurationSec) {
         // Time already up: lock the red ring and reveal submit.
         borderPath.style.animation = "none";
@@ -2714,8 +2791,22 @@ function restoreState(s) {
         borderPath.style.strokeDashoffset = "0";
         document.body.classList.add("time-up");
       } else {
-        // Resume the drain partway through.
-        startBorderDrain(elapsed);
+        startBorderDrain(elapsed); // resume the drain partway through
+      }
+    } else if (sharedGame && sharedGame.practice) {
+      const T = Math.max(1, Math.round((sharedGame.outcome && sharedGame.outcome.timeSec) || 60));
+      if (elapsed >= 2 * T) {                 // both laps done -> solid red
+        borderPath.style.animation = "none";
+        borderPath.style.stroke = "var(--red)";
+        borderPath.style.strokeDashoffset = "0";
+      } else if (elapsed >= T) {              // into the red lap
+        borderGrowSec = T; borderRedGrow = true;
+        borderPath.style.stroke = "var(--red)";
+        borderPath.style.strokeDashoffset = "";
+        borderPath.style.animation = "borderFill " + T + "s linear forwards";
+        borderPath.style.animationDelay = "-" + (elapsed - T) + "s";
+      } else {
+        startBorderGrow(elapsed);             // resume the green lap
       }
     }
     positionPageDel();
@@ -2754,6 +2845,7 @@ function sharePuzzle() {
     t: currentTarget,
     n: slotValues.slice(),
     s: Math.max(1, Math.round(lastOutcome.timeSec)), // opponent's bar duration
+    pr: (sharedGame ? sharedGame.practice : practiceGame) ? 1 : 0, // my mode (practice = growing ring)
     w: history.slice(),                               // my working
     intro: introDraws.slice(),                        // intro replay (roll + draws)
     o: {
@@ -3266,6 +3358,7 @@ function loadFromURL() {
     if (data.o) {
       sharedGame = {
         t: t, n: nums, s: data.s,
+        practice: !!data.pr, // sender's game was practice -> a growing ring, not draining
         outcome: {
           solved: !!data.o.solved,
           timeSec: Number(data.o.timeSec) || 0,
@@ -3275,8 +3368,8 @@ function loadFromURL() {
           working: data.w || [],
         },
       };
-      borderDurationSec = 120; // receiver always gets the full 2:00 (red at the sender's time)
-      practiceGame = false; // shared games are always timed
+      borderDurationSec = 120; // a shared TIMED game still gives the receiver the full 2:00
+      practiceGame = false; // the receiver isn't in their own practice mode (sharedGame.practice drives the ring)
       document.body.classList.remove("home-timer");
       refreshBeat();              // the green "Beat X" banner (time/score to beat)
       beatEl.classList.add("show");
@@ -3459,14 +3552,14 @@ function playIntro(t, nums, draws) {
   const HOLD = 2000, RISE = 800, FADE = 500, beat = maxEnd + 450;
   ev.push({ t: beat, fn: () => {
     initPages(); layoutBorder(); resetBorder();
-    timerEl.textContent = "00:00";
+    timerEl.textContent = isTimedGame() ? fmtTime(TIMED_SEC) : "00:00";
     document.body.classList.remove("time-up"); document.body.classList.add("entering");
     positionBeat();
   } });
-  ev.push({ t: beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); positionBeat(); } });
+  ev.push({ t: beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); trackBeatFor(RISE + 120); } });
   ev.push({ t: beat + HOLD + RISE, fn: () => { document.body.classList.add("playing"); calcEl.style.maxHeight = "80vh"; positionBeat(); } });
   ev.push({ t: beat + HOLD + RISE + FADE, fn: () => {
-    startTimer(); startBorderDrain(0); positionPageDel(); positionBeat();
+    startTimer(); startBorder(0); positionPageDel(); positionBeat();
     replaying = false; document.body.classList.remove("replay");
     saveState();
   } });
