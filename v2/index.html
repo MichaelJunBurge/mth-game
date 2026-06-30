@@ -110,6 +110,12 @@
     from { stroke-dashoffset: 1000; }  /* empty */
     to   { stroke-dashoffset: 0; }     /* full, filling clockwise */
   }
+  /* Runs alongside the drain: holds green, then snaps to red at the end of its
+     own (shorter) duration — the halfway mark on a 2:00 timed game. */
+  @keyframes borderHalf {
+    0%, 99.99% { stroke: var(--green); }
+    100%       { stroke: var(--red); }
+  }
 
   /* Timer — sits muted at 20%; clickable during play to open the menu. */
   .timer {
@@ -128,16 +134,17 @@
     opacity: 0;
     transition: opacity 0.3s;
   }
-  /* Timed/shared games show the timer while entering, playing, and during a
-     shared intro. Practice games have no timer at all. */
-  body.entering:not(.practice) .timer,
-  body.playing:not(.practice) .timer,
+  /* The timer (a stopwatch) shows during entering/playing in BOTH modes and
+     during a shared intro. Practice just drops the budget on the home screen
+     and the draining ring — the clock itself still runs (and opens the menu). */
+  body.entering .timer,
+  body.playing .timer,
   body.replay .timer,
   body.home-timer .timer { opacity: 1; } /* home-timer = the budget preview (02:00 / time-to-beat) */
   /* On home in timed mode the 02:00 sits where the hamburger would — so it
      doubles as the menu button (tap it, like the timer during play) and the
      hamburger hides to avoid overlapping it. */
-  body.playing:not(.practice) .timer,
+  body.playing .timer,
   body.home-timer .timer { pointer-events: auto; cursor: pointer; }
   body.home-timer #nav-menu { opacity: 0; pointer-events: none; }
   body.playing .timer:hover, body.home-timer .timer:hover { color: var(--ink); }
@@ -167,14 +174,13 @@
   }
   .nav-icon:hover { opacity: 1; }
   .nav-icon:active { transform: translateX(-50%) scale(0.9); }
-  .nav-top { top: 5vh; top: calc(5dvh + env(safe-area-inset-top, 0px)); }
-  .nav-bottom { bottom: 5vh; bottom: calc(5dvh + env(safe-area-inset-bottom, 0px)); }
+  /* Subtract the button padding so the GLYPH lands the same 5dvh from its edge
+     as the timer text does from the top — consistent spacing top and bottom. */
+  .nav-top { top: 5vh; top: calc(5dvh - 0.4em + env(safe-area-inset-top, 0px)); }
+  .nav-bottom { bottom: 5vh; bottom: calc(5dvh - 0.4em + env(safe-area-inset-bottom, 0px)); }
   body.entering .nav-icon,
   body.playing .nav-icon,
   body.won .nav-icon { opacity: 0; pointer-events: none; }
-  /* Practice has no timer to tap, so keep the hamburger up top for menu access. */
-  body.entering.practice #nav-menu,
-  body.playing.practice #nav-menu { opacity: 0.85; pointer-events: auto; }
   /* During a shared-intro replay the hamburger + profile stay available (so a
      new player can read Help before the puzzle starts) — even while "entering". */
   body.replay .nav-icon { opacity: 0.85; pointer-events: auto; }
@@ -1266,13 +1272,24 @@ if (window.visualViewport) {
 borderPath.addEventListener("animationend", (e) => {
   if (e.animationName === "borderDrain") {
     document.body.classList.add("time-up");
-    startRedFill();
+    // Own 2:00 game: the clock's up, auto-register the score. Shared games keep
+    // growing a red ring so the recipient can still go over the sender's time.
+    if (sharedGame) startRedFill();
+    else autoSubmitTimeUp();
   } else if (e.animationName === "borderFill") {
     borderPath.style.animation = "none";
     borderPath.style.stroke = "var(--red)";
     borderPath.style.strokeDashoffset = "0"; // solid full red
   }
 });
+// Time's up on an own timed game: score the calculator page you're on (or, from
+// the sketchpad, the calc page immediately to its right).
+function autoSubmitTimeUp() {
+  if (document.body.classList.contains("won")) return;
+  if (pageIndex === 0) gotoPageCore(1); // sketchpad -> first calc page
+  if (pageIndex < 1) return;
+  finishSubmitted();
+}
 function resetBorder() {
   // back to the full, static green ring
   borderPath.style.animation = "";
@@ -1282,11 +1299,21 @@ function resetBorder() {
   borderPath.style.animationPlayState = "";
 }
 // Start (or resume, via delaySec) the green drain — full to empty, clockwise.
+// Own timed games also turn red at the halfway mark (borderHalf); shared games
+// drain plain green (then grow a red overtime ring — see the animationend).
 function startBorderDrain(delaySec) {
+  const d = delaySec || 0;
   borderPath.style.stroke = "";
   borderPath.style.strokeDashoffset = "";
-  borderPath.style.animation = "borderDrain " + borderDurationSec + "s linear forwards";
-  borderPath.style.animationDelay = "-" + (delaySec || 0) + "s";
+  if (sharedGame) {
+    borderPath.style.animation = "borderDrain " + borderDurationSec + "s linear forwards";
+    borderPath.style.animationDelay = "-" + d + "s";
+  } else {
+    const redSec = borderDurationSec / 2; // 1:00 on a 2:00 game
+    borderPath.style.animation =
+      "borderDrain " + borderDurationSec + "s linear forwards, borderHalf " + redSec + "s linear forwards";
+    borderPath.style.animationDelay = "-" + d + "s, -" + d + "s";
+  }
 }
 // Red ring grows clockwise for one rotation (same duration as the green lap),
 // then locks solid.
@@ -1972,7 +1999,7 @@ sketchEl.addEventListener("pointercancel", endPadStroke);
    the new one slides in from the other side. Reversed/natural: drag RIGHT goes
    to the page on the LEFT, drag LEFT goes to the page on the right. */
 const calcwrapEl = document.querySelector(".calcwrap");
-let swipeX = 0, swipeY = 0, swipeT0 = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null, homeSwiping = false;
+let swipeX = 0, swipeY = 0, swipeT0 = 0, swiping = false, swipeHoriz = false, swipeDone = false, animating = false, swipeAxis = null, homeSwiping = false, lastPointerType = "";
 let longPressTimer = null;
 let vDir = 0; // vertical-swipe direction once the axis locks: +1 = help (up), -1 = menu (down)
 // A sheet opens if dragged far enough OR flicked fast enough over a short distance.
@@ -2102,9 +2129,17 @@ stageEl.addEventListener("pointerdown", (e) => {
     maybeArmDelete(e);
   }
   swipeX = e.clientX; swipeY = e.clientY; swipeT0 = Date.now();
+  lastPointerType = e.pointerType;
   if (e.pointerType === "mouse") return; // mouse: arms only; arrows for nav
   swiping = true; swipeHoriz = false; swipeDone = false; swipeAxis = null; homeSwiping = false;
   if (playing) { calcwrapEl.classList.remove("snapback"); calcwrapEl.classList.add("dragging"); }
+});
+// Desktop: clicking the empty left/right half of the home screen flips the mode,
+// the same as a swipe does on mobile (mobile taps don't, only swipes).
+stageEl.addEventListener("click", (e) => {
+  if (lastPointerType !== "mouse" || animating || !canHomeModeSwipe()) return;
+  if (e.target.closest("#target, .arrow, .nav-icon, .pager-arrow, .pad-undo, #timer, button")) return;
+  commitModeSwipe(e.clientX < window.innerWidth / 2 ? 1 : -1); // left half slides like a right-swipe
 });
 stageEl.addEventListener("pointermove", (e) => {
   if (longPressTimer && (Math.abs(e.clientX - swipeX) > 10 || Math.abs(e.clientY - swipeY) > 10)) cancelLongPress();
@@ -2239,7 +2274,8 @@ function startPlaying() {
   document.body.classList.add("playing");
   showCalcInstant();
   collapseArrowsInstant();
-  if (!practiceGame) { startTimer(); startBorderDrain(0); } // timed only
+  startTimer();                            // the clock runs in both modes
+  if (!practiceGame) startBorderDrain(0);  // only timed drains the ring
   positionPageDel();
   saveState();
 }
@@ -2276,7 +2312,8 @@ function beginEntrance() {
       document.body.classList.add("playing");      // calc fades in immediately
       calcEl.style.maxHeight = "80vh";             // allow the tape to expand
       entranceTimers.push(setTimeout(() => {
-        if (!practiceGame) { startTimer(); startBorderDrain(0); } // timed only
+        startTimer();                            // the clock runs in both modes
+        if (!practiceGame) startBorderDrain(0);  // only timed drains the ring
         positionPageDel();
         saveState();
       }, FADE_MS));
@@ -2364,7 +2401,7 @@ function currentGoal() {
 
 function finishSolved() {
   flushAnswerToTape();
-  lastOutcome = { solved: true, timeSec: practiceGame ? 0 : elapsedSeconds(), score: currentTarget, goal: currentGoal(), distance: 0 };
+  lastOutcome = { solved: true, timeSec: elapsedSeconds(), score: currentTarget, goal: currentGoal(), distance: 0 };
   endGame();
 }
 
@@ -2376,7 +2413,7 @@ function finishSubmitted() {
   const goal = currentGoal();
   lastOutcome = {
     solved: false,
-    timeSec: practiceGame ? 0 : elapsedSeconds(),
+    timeSec: elapsedSeconds(),
     score: score,
     goal: goal,
     distance: Math.abs(score - goal),
@@ -2440,10 +2477,8 @@ function endGame() {
     });
     winTheirEl.classList.add("show");
   } else {
-    // Practice has no clock, so a solved practice game shows the number reached
-    // ("Solved it!") instead of a time.
-    winLabelEl.textContent = me.solved ? (practiceGame ? t("win.solvedIt") : t("win.solvedIn")) : t("win.yourScore");
-    winValueEl.textContent = (practiceGame && me.solved) ? String(me.score) : fmtResult(me);
+    winLabelEl.textContent = me.solved ? t("win.solvedIn") : t("win.yourScore");
+    winValueEl.textContent = fmtResult(me);
     winSubEl.textContent = me.solved
       ? ""
       : me.distance === 0
@@ -2647,9 +2682,9 @@ function restoreState(s) {
     document.body.classList.add("playing");
     showCalcInstant();
     collapseArrowsInstant();
+    runTimerLoop(); // the clock runs in both modes
     if (!practiceGame) {
       const elapsed = (Date.now() - startEpoch) / 1000;
-      runTimerLoop();
       if (elapsed >= borderDurationSec) {
         // Time already up: lock the red ring and reveal submit.
         borderPath.style.animation = "none";
