@@ -45,8 +45,11 @@
     --dur-sheet: 0.42s;
 
     /* One width drives the column AND every text size, so they scale together
-       and stop growing once the column is capped. */
-    --app-w: min(60vw, 310px);                  /* mobile: ~60% of the screen */
+       and stop growing once the column is capped. --scale (menu slider) shrinks
+       the whole column proportionally; timer/dots spacing is dvh-based so it's
+       unaffected and the column stays centred. */
+    --scale: 1;                                 /* 1 = large (default); slider 0.6–1.0 */
+    --app-w: calc(min(60vw, 310px) * var(--scale)); /* mobile: ~60% of the screen */
     --size-target: calc(var(--app-w) * 0.15);   /* the 000 target — hero size */
     --size-number: calc(var(--app-w) * 0.066);  /* six numbers + main calc line */
     --size-ui: calc(var(--app-w) * 0.05);        /* timer, keys, tape, buttons */
@@ -69,7 +72,7 @@
   }
   :root.dark { color-scheme: dark; }
   @media (min-width: 768px) {
-    :root { --app-w: min(33vw, 310px); }         /* desktop: ~a third, capped */
+    :root { --app-w: calc(min(33vw, 310px) * var(--scale)); } /* desktop: ~a third, capped */
   }
   * { box-sizing: border-box; }
   /* Lock the viewport: the page itself never scrolls or rubber-bands. Only the
@@ -781,6 +784,27 @@
     transition: transform 0.08s;
   }
   .menu-btn:hover { transform: scale(1.12); }
+  /* Size slider — shrinks the whole game column (small ↔ large). Fixed px sizes
+     so it stays usable at any scale. */
+  .menu-slider {
+    -webkit-appearance: none; appearance: none;
+    width: min(55vw, 220px);
+    height: 3px;
+    background: var(--grey);
+    border-radius: 2px;
+    outline: none;
+    margin: 0.4em 0;
+    cursor: pointer;
+  }
+  .menu-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--ink); cursor: pointer;
+  }
+  .menu-slider::-moz-range-thumb {
+    width: 18px; height: 18px; border: none; border-radius: 50%;
+    background: var(--ink); cursor: pointer;
+  }
   /* Submit goes green once all six numbers are used (a "you can stop" cue). */
   .menu-btn.ready { color: var(--green); }
   .guide-back { color: var(--red); } /* the Back text buttons in the help views */
@@ -982,6 +1006,7 @@
       <button id="menu-sign" class="menu-btn">Auto (×)</button>
       <button id="menu-theme" class="menu-btn">Dark mode</button>
       <button id="menu-lang" class="menu-btn">한국어</button>
+      <input id="menu-scale" class="menu-slider" type="range" min="0.6" max="1" step="0.1" value="1" aria-label="Size" />
     </div>
   </div>
 
@@ -1028,7 +1053,7 @@ import { evalExpression } from "./src/core/evaluate.js";
 import { computeScore as coreComputeScore, goalFor, distance as coreDistance, verdict } from "./src/core/scoring.js";
 import { buildSnapshot, normalizeSnapshot } from "./src/core/gameState.js";
 // Cross-cutting constants + the localStorage wrapper.
-import { SAVE_KEY, THEME_KEY, AUTOEQ_KEY, AUTOSIGN_KEY, LANG_KEY, MODE_KEY, TIMED_SEC, MAX_CALCS, THEME_BG } from "./src/config/constants.js";
+import { SAVE_KEY, THEME_KEY, AUTOEQ_KEY, AUTOSIGN_KEY, LANG_KEY, MODE_KEY, SCALE_KEY, TIMED_SEC, MAX_CALCS, THEME_BG } from "./src/config/constants.js";
 import { storage } from "./src/services/storage.js";
 import { t, setLang, getLang } from "./src/services/i18n.js";
 import { encodeGame, parseShareParams } from "./src/services/share.js";
@@ -2861,6 +2886,21 @@ function toggleTheme() {
   storage.set(THEME_KEY, dark ? "dark" : "light");
 }
 
+// Size slider: scales the whole game column via --scale (0.6 small .. 1.0 large).
+// Spacing stays put (timer/dots are dvh-based) and the column stays centred; the
+// JS-positioned bits (page-x, submit, beat, ring, sketch) re-measure after.
+function applyScale(v) {
+  const s = Math.max(0.6, Math.min(1, Number(v) || 1));
+  document.documentElement.style.setProperty("--scale", String(s));
+  const slider = document.getElementById("menu-scale");
+  if (slider) slider.value = String(s);
+  onViewportResize();
+}
+function setScale(v) {
+  applyScale(v);
+  storage.set(SCALE_KEY, String(document.documentElement.style.getPropertyValue("--scale") || 1));
+}
+
 function applyAutoEqual(on) {
   autoEqual = on;
   document.getElementById("menu-auto").textContent = t(on ? "auto.on" : "auto.off");
@@ -3015,6 +3055,7 @@ submitEl.addEventListener("click", finishSubmitted);
 document.getElementById("menu-theme").addEventListener("click", toggleTheme);
 document.getElementById("menu-auto").addEventListener("click", toggleAutoEqual);
 document.getElementById("menu-sign").addEventListener("click", cycleAutoSign);
+document.getElementById("menu-scale").addEventListener("input", (e) => setScale(e.target.value));
 
 /* ---------------- Help: question-mark popup + walkthrough ---------------- */
 const guideEl = document.getElementById("guide");
@@ -3449,6 +3490,7 @@ sizeSketch();
 setLang(storage.get(LANG_KEY) === "ko" ? "ko" : "en");
 gameMode = (storage.get(MODE_KEY) === "practice") ? "practice" : "timed";
 applyTheme(storage.get(THEME_KEY) || "light");
+applyScale(storage.get(SCALE_KEY) || 1);
 applyAutoEqual((storage.get(AUTOEQ_KEY) || "on") !== "off");
 applyAutoSign(storage.get(AUTOSIGN_KEY) || "x");
 applyLang();
