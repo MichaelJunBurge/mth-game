@@ -239,14 +239,19 @@
     font-family: var(--font);                    /* match the target + the rest of the site */
     color: var(--ink);
     cursor: pointer;
-    font-size: calc(var(--size-ui) * 1.5);
+    font-size: var(--size-ui);                   /* match the menu text size */
     font-weight: 700;
-    letter-spacing: 0.01em;
+    letter-spacing: 0.15em;                      /* same as the menu buttons */
     padding: 0.3em 0.5em;
     transition: opacity 0.15s ease, transform 0.08s;
   }
   .intro-word:hover { opacity: 0.85; }
   .intro-word:active { transform: scale(0.96); }
+  /* Each letter flickers random letters then locks left-to-right, like the target
+     reels. Roboto Mono is monospace, so the word width stays put while it spins. */
+  .intro-letter { display: inline-block; }
+  .intro-letter.spinning { color: var(--dim); }
+  .intro-letter.lock { animation: pop 0.28s ease; }
   .intro-soon {
     color: var(--muted, var(--ink));
     font-family: var(--font);
@@ -1178,7 +1183,7 @@ function refreshHomeTimer() {
   const intro = onHome && introActive();
   b.classList.toggle("mode-intro-on", intro);
   if (intro) {
-    document.getElementById("intro-word").textContent = t(gameMode === "ranked" ? "mode.ranked" : "mp.title");
+    setIntroWord(introWordText());
     document.getElementById("mode-intro").classList.remove("revealed", "leaving");
   }
   if (onHome && gameMode === "ranked" && rankedRevealed) {
@@ -1197,6 +1202,7 @@ function setMode(m) {
 function revealRanked() {
   const intro = document.getElementById("mode-intro");
   if (intro.classList.contains("leaving")) return;
+  setIntroWord(introWordText());               // snap to the finished word before fading (if tapped mid-flicker)
   intro.classList.add("leaving");
   let done = false;
   const once = (e) => {
@@ -1212,6 +1218,41 @@ function revealRanked() {
   intro.addEventListener("transitionend", once);
   setTimeout(once, 360);                       // fallback if transitionend doesn't fire
 }
+
+// Slot-machine letter cycling for the intro word — mirrors the target reels: each
+// letter flickers random letters, then locks left-to-right to spell the word.
+let introTimers = [];
+function clearIntroAnim() { introTimers.forEach((id) => { clearInterval(id); clearTimeout(id); }); introTimers = []; }
+function buildIntroLetters(text) {
+  const word = document.getElementById("intro-word");
+  word.textContent = "";
+  return [...text].map((ch) => {
+    const s = document.createElement("span");
+    s.className = "intro-letter";
+    s.textContent = ch;
+    word.appendChild(s);
+    return s;
+  });
+}
+function setIntroWord(text) { clearIntroAnim(); buildIntroLetters(text); } // static (init / language toggle)
+function animateIntroWord(text) {
+  clearIntroAnim();
+  const spans = buildIntroLetters(text);
+  const rnd = () => String.fromCharCode(65 + randInt(0, 25));
+  spans.forEach((s, i) => {
+    s.classList.add("spinning");
+    s.textContent = rnd();
+    const spin = setInterval(() => { s.textContent = rnd(); }, 45);
+    introTimers.push(spin);
+    introTimers.push(setTimeout(() => {            // stop + lock this letter (cascades left-to-right)
+      clearInterval(spin);
+      s.textContent = text[i];
+      s.classList.remove("spinning");
+      s.classList.add("lock");
+    }, 240 + i * 70));
+  });
+}
+function introWordText() { return t(gameMode === "ranked" ? "mode.ranked" : "mp.title"); }
 
 /* ---------------- Chevron arrows (identical up/down) ---------------- */
 function chevron(dir) {
@@ -2236,11 +2277,13 @@ function commitModeSwipe(goRight) { // goRight: go to the right neighbour (new p
   swipeDone = true; animating = true;
   const W = window.innerWidth, s = goRight ? -1 : 1; // old page exits AWAY from the new one (it enters from the tapped side)
   rankedRevealed = false;                            // each landing on Ranked re-shows its intro
+  clearIntroAnim();                                  // stop the outgoing page's letters
   document.getElementById("mode-intro").classList.remove("revealed", "leaving");
   contentEl.style.transition = "transform 0.16s ease-in";
   setContentDrag(s * W);                              // current page exits, the new one comes from the opposite side
   setTimeout(() => {
     setMode(nextHomeMode(goRight));
+    if (introActive()) animateIntroWord(introWordText()); // letters flicker in while it slides, lock left-to-right
     contentEl.style.transition = "none";
     setContentDrag(-s * W);                           // new page starts off the other side
     void contentEl.offsetWidth;
