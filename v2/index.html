@@ -9,6 +9,20 @@
      match the theme; updated live by applyTheme(). color-scheme is driven from
      CSS (:root vs :root.dark) so native areas + form controls follow too. -->
 <meta name="theme-color" id="theme-color-meta" content="#ffffff" />
+<!-- Apply the saved theme BEFORE first paint, so the html background + status-bar
+     tint are correct on load (iOS reads theme-color early and won't always re-read
+     a later JS change). -->
+<script>
+  (function () {
+    try {
+      if (localStorage.getItem("numbersRound.theme.v2") === "dark") {
+        document.documentElement.classList.add("dark");
+        var m = document.getElementById("theme-color-meta");
+        if (m) m.setAttribute("content", "#14161a");
+      }
+    } catch (e) {}
+  })();
+</script>
 <!-- Added-to-home-screen runs fullscreen, so the ring wraps the whole screen. -->
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -3038,8 +3052,15 @@ function applyTheme(theme) {
   const dark = theme === "dark";
   document.documentElement.classList.toggle("dark", dark); // html -> safe-area bg + color-scheme
   document.body.classList.toggle("dark", dark);
-  const meta = document.getElementById("theme-color-meta");
-  if (meta) meta.setAttribute("content", dark ? "#14161a" : "#ffffff"); // browser chrome / status bar
+  // Re-create the theme-color meta rather than editing it in place — iOS Safari
+  // re-reads a freshly inserted meta, but can ignore an in-place content change.
+  const old = document.getElementById("theme-color-meta");
+  if (old) old.remove();
+  const meta = document.createElement("meta");
+  meta.setAttribute("name", "theme-color");
+  meta.id = "theme-color-meta";
+  meta.setAttribute("content", dark ? "#14161a" : "#ffffff");
+  document.head.appendChild(meta);
   document.getElementById("menu-theme").textContent = dark ? t("theme.light") : t("theme.dark");
 }
 function toggleTheme() {
