@@ -455,7 +455,7 @@
   /* Only DURING play does the extra bottom padding lift the keypad-heavy column so
      it reads as optically centred; home + the Ranked/Multiplayer intro stay at
      true centre. */
-  body.playing .stage { padding-bottom: calc(24px + 6dvh + env(safe-area-inset-bottom, 0px)); }
+  body.playing .stage { padding-bottom: calc(24px + 3dvh + env(safe-area-inset-bottom, 0px)); }
   /* One centered column whose width is the shared --app-w. Spacing is on the
      children (not a flex gap) so the collapsed calculator adds no gap on home. */
   .content {
