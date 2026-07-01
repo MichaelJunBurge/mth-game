@@ -1974,7 +1974,11 @@ function pressKey(label) {
   if (label === "=") { pushUndo(); handleEquals(); return; }
   pushUndo();
   if (label === "()") { expr += nextBracket(); renderDisplay(); saveState(); return; }
-  expr += label; // binary operator: + - x ÷ ^ √  (a√b = b-th root of a)
+  // Binary operator: + - x ÷ ^ √  (a√b = b-th root of a). Pressing an operator right
+  // after another REPLACES it (e.g. "5÷" then "x" -> "5x"), so you can correct the
+  // sign without deleting. Brackets are handled above, so they never replace.
+  const last = expr[expr.length - 1] || "";
+  expr = /[+\-x÷^√]/.test(last) ? expr.slice(0, -1) + label : expr + label;
   renderDisplay();
   saveState();
 }
