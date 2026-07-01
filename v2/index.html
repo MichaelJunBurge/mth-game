@@ -939,6 +939,7 @@
   .game-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; padding: 0.4em 0; cursor: pointer; }
   .game-row.disabled { opacity: 0.4; pointer-events: none; }   /* a group you can't send to yet (shows the countdown) */
   .trophy { margin-left: 0.35em; font-size: 0.9em; }
+  .game-status { color: var(--muted); font-weight: 400; font-size: 0.85em; }
   .game-main { display: flex; flex-direction: column; gap: 0.15em; min-width: 0; }
   .game-title { font-size: calc(var(--size-ui) * 0.92); color: var(--ink); }
   .game-sub { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); }
@@ -3968,7 +3969,7 @@ async function renderGroupDetail(searchResults) {
   body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
   try {
     const g = await groupsApi();
-    const [members, board, standings] = await Promise.all([g.listMembers(currentGroupId), g.groupBoard(currentGroupId), g.standings(currentGroupId)]);
+    const [members, games, standings] = await Promise.all([g.listMembers(currentGroupId), g.games(currentGroupId), g.standings(currentGroupId)]);
     const memberIds = new Set(members.map((m) => m.user_id));
     let html = "";
     if (searchResults && searchResults.length) {
@@ -3991,21 +3992,26 @@ async function renderGroupDetail(searchResults) {
       });
       html += '</div>';
     }
+    // Games sent by others that are still open and I haven't played -> Play buttons.
+    const toPlay = (games || []).filter((gm) => gm.active && !gm.i_played && !gm.i_sent);
+    if (toPlay.length) {
+      html += '<div class="games-label">' + t("groups.toPlay") + '</div>';
+      toPlay.forEach((gm) => {
+        html += '<div class="game-row"><div class="game-main"><div class="game-title">' + t("games.target", { n: gm.target }) + '</div><div class="game-sub">' + t("groups.fromN", { u: escHtml(gm.sender || "?") }) + ' · ' + t("share.freesIn", { t: fmtCountdown(gm.expires) }) + '</div></div><div class="game-right"><button class="friend-act" data-play="' + gm.cid + '">' + t("groups.play") + '</button></div></div>';
+      });
+    }
     html += '<div class="games-label">' + t("groups.membersLabel") + '</div>';
     members.forEach((m) => html += friendRow(m.username || "?", ""));
+    // Every game + its ranked scoreboard, with a status (complete / free in Xh / expired).
     html += '<div class="games-label">' + t("groups.board") + '</div>';
-    if (!board.length) html += '<div class="stat-line">' + t("groups.emptyBoard") + '</div>';
-    board.forEach((c) => {
-      // Leaderboard = the creator's own score (their benchmark) + everyone's attempts,
-      // ranked by distance then time.
-      const co = c.payload.o || {};
-      const rows = [{ username: c.creator_username, solved: !!co.solved, distance: Number(co.distance) || 0, time_sec: Number(co.timeSec) || 0 }];
-      (c.attempts || []).forEach((a) => { if (a.username !== c.creator_username) rows.push({ username: a.username, solved: a.solved, distance: Number(a.distance) || 0, time_sec: Number(a.time_sec) || 0 }); });
-      rows.sort((x, y) => (x.distance - y.distance) || (x.time_sec - y.time_sec));
-      html += '<div class="game-title">' + t("games.target", { n: c.payload.t }) + '</div><div class="lb">';
-      rows.slice(0, 8).forEach((a, i) => {
+    if (!games.length) html += '<div class="stat-line">' + t("groups.emptyBoard") + '</div>';
+    games.forEach((gm) => {
+      const status = gm.completed ? t("groups.complete") : gm.active ? t("share.freesIn", { t: fmtCountdown(gm.expires) }) : t("groups.expired");
+      html += '<div class="game-title">' + t("games.target", { n: gm.target }) + ' · ' + escHtml(gm.sender || "?") + ' <span class="game-status">' + status + '</span></div><div class="lb">';
+      (gm.board || []).slice(0, 8).forEach((a, i) => {
         const me = a.username === authUsername;
-        html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(a.username || "?") + '</span><span class="res">' + (a.solved ? fmtTime(Math.round(a.time_sec)) : t("games.off", { d: a.distance })) + '</span></div>';
+        const res = a.solved ? fmtTime(Math.round(a.time_sec)) : (a.distance >= 1e8 ? "—" : t("games.off", { d: Math.round(a.distance) }));
+        html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(a.username || "?") + '</span><span class="res">' + res + '</span></div>';
       });
       html += '</div>';
     });
@@ -4023,6 +4029,8 @@ document.getElementById("group-add-search").addEventListener("input", (e) => {
 });
 document.getElementById("group-detail-body").addEventListener("click", async (e) => {
   const add = e.target.closest("[data-addmember]"), leave = e.target.closest("[data-leave]");
+  const play = e.target.closest("[data-play]");
+  if (play) { closeGuide(); loadChallenge(play.dataset.play, false); return; } // play a group game (no gate)
   if (add) { add.disabled = true; try { const api = await groupsApi(); const r = await api.inviteMember(currentGroupId, add.dataset.addmember); if (!r.ok) await api.addMember(currentGroupId, add.dataset.addmember); /* pre-SQL fallback: direct add */ document.getElementById("group-add-search").value = ""; renderGroupDetail(null); } catch (err) {} }
   else if (leave) { try { await (await groupsApi()).leaveGroup(currentGroupId); openGroups(); } catch (err) {} }
 });
@@ -4254,7 +4262,7 @@ function loadFromURL() {
 }
 
 // Open a shared puzzle payload (from a ?g= decode or a fetched ?c= challenge).
-function playSharedData(data, code) {
+function playSharedData(data, code, gate = true) {
   const t = parseInt(data.t, 10);
   const nums = (data.n || []).map(Number);
   if (isNaN(t) || nums.length !== SLOT_COUNT || nums.some(isNaN)) return false;
@@ -4290,8 +4298,10 @@ function playSharedData(data, code) {
   const hasIntro = Array.isArray(data.intro) && data.intro.length === SLOT_COUNT &&
     data.intro.every((d) => d && typeof d.i === "number" && typeof d.t === "number");
   if (hasIntro) {
-    // Open the target roll, then gate on the help/profile sheet before the numbers draw.
-    playIntro(t, nums, data.intro, true); // does backToHome, sets up + schedules the replay
+    // Open the target roll, then (for a fresh shared link) gate on the help/profile
+    // sheet before the numbers draw. Group games pass gate:false — you already chose
+    // to play, so it runs straight through.
+    playIntro(t, nums, data.intro, gate); // does backToHome, sets up + schedules the replay
     activeShareCode = code || null; // backToHome cleared it
     setShared();
     return true;
@@ -4318,11 +4328,11 @@ function playSharedData(data, code) {
 // A tracked challenge link (?c=<id>): fetch the puzzle, then play it like a share.
 // activeChallengeId is set AFTER playSharedData (playIntro's backToHome clears it),
 // so the attempt gets recorded on finish.
-async function loadChallenge(id) {
+async function loadChallenge(id, gate = true) {
   try {
     const c = await (await import("./src/services/challenges.js")).getChallenge(id);
     if (!c || !c.payload) { goHome(); return false; }
-    const ok = playSharedData(c.payload, null);
+    const ok = playSharedData(c.payload, null, gate);
     if (ok) activeChallengeId = id;
     return ok;
   } catch (e) { goHome(); return false; }
