@@ -2567,14 +2567,17 @@ stageEl.addEventListener("click", (e) => {
 // Desktop trackpad: two-finger swipes mirror mobile swipes, via one window-level
 // handler (so it works while a sheet covers the screen). Fires once per swipe with
 // a per-gesture AXIS LOCK (accumulated dx/dy picks horizontal page/mode-nav vs
-// vertical sheets). After a swipe fires we lock and ignore its momentum tail — but
-// the tail's magnitude decays toward zero, so once it has DIPPED near zero the next
-// firm push is recognised as a fresh swipe and re-fires. (Magnitude alone can't do
-// this: a normal swipe accelerates, so "bigger than last" would double-fire on its
-// own rising edge — the dip is what marks the boundary between gestures.) A 90ms
-// idle reset also clears state between separated swipes. No `animating` guard, so
-// swipes work mid-animation. deltaX/Y = -finger movement.
-let gDX = 0, gDY = 0, gWheelIdle = null, gWheelLock = false, gDipped = false;
+// vertical sheets). After a swipe fires we lock and ignore its momentum tail. The
+// momentum only ever CONTINUES the fired direction and decays, so a genuinely new
+// swipe is unmistakable — it either pushes back the OTHER way (reversal, e.g. swipe
+// down to open a menu then up to close it), pushes on the OTHER axis (perpendicular),
+// or comes as a fresh push after the momentum has died to ~zero (dip then rise). Any
+// of those re-arms the handler so the next swipe registers immediately — the earlier
+// versions only had the dip, which a still-flowing tail could hide, dropping quick
+// open/close swipes. A 110ms idle reset also clears state between separated swipes.
+// No `animating` guard, so swipes work mid-animation (incl. during the intro reveal).
+// deltaX/Y = -finger movement.
+let gDX = 0, gDY = 0, gWheelIdle = null, gWheelLock = false, gDipped = false, gAxis = "", gSign = 0;
 window.addEventListener("wheel", (e) => {
   if (Math.abs(e.deltaX) < 0.5 && Math.abs(e.deltaY) < 0.5) return;
   // Let genuinely-scrollable overlay text scroll instead of hijacking the swipe.
@@ -2584,19 +2587,24 @@ window.addEventListener("wheel", (e) => {
     if (!((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom))) return;
   }
   e.preventDefault();
-  const mag = Math.abs(e.deltaX) + Math.abs(e.deltaY);
+  const ax = Math.abs(e.deltaX), ay = Math.abs(e.deltaY), mag = ax + ay;
   clearTimeout(gWheelIdle);
-  gWheelIdle = setTimeout(() => { gDX = 0; gDY = 0; gWheelLock = false; gDipped = false; }, 90);
+  gWheelIdle = setTimeout(() => { gDX = 0; gDY = 0; gWheelLock = false; gDipped = false; gAxis = ""; gSign = 0; }, 110);
   if (gWheelLock) {                                        // already fired this gesture
-    if (mag < 6) gDipped = true;                           // its momentum has (nearly) died out
-    else if (gDipped && mag > 12) { gWheelLock = false; gDipped = false; gDX = 0; gDY = 0; } // fresh push -> new swipe
-    else return;                                           // still the same gesture / its momentum tail
+    const along = gAxis === "h" ? e.deltaX : e.deltaY;     // movement on the fired axis
+    const cross = gAxis === "h" ? ay : ax;                 // movement on the other axis
+    const reversed = gSign && Math.sign(along) === -gSign && Math.abs(along) > 8; // push back the other way
+    const perpendicular = cross > 12 && cross > Math.abs(along) * 1.4;            // push on the other axis
+    if (mag < 6) gDipped = true;                           // momentum has (nearly) died out
+    if (reversed || perpendicular || (gDipped && mag > 12)) {                     // a genuinely new swipe
+      gWheelLock = false; gDipped = false; gDX = 0; gDY = 0; gAxis = ""; gSign = 0;
+    } else return;                                         // still the same gesture / its momentum tail
   }
   gDX += e.deltaX; gDY += e.deltaY;
   const horiz = Math.abs(gDX) >= Math.abs(gDY);
   if ((horiz ? Math.abs(gDX) : Math.abs(gDY)) < 30) return;
   const dirX = gDX, dirY = gDY;
-  gWheelLock = true; gDX = 0; gDY = 0;
+  gWheelLock = true; gAxis = horiz ? "h" : "v"; gSign = Math.sign(horiz ? dirX : dirY); gDX = 0; gDY = 0; gDipped = false;
   const menuOpen = document.body.classList.contains("menu-open");
   const guideOpen = document.body.classList.contains("guide-open");
   if (horiz) {
