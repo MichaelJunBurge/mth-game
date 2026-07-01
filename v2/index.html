@@ -1426,6 +1426,7 @@ function refreshHomeTimer() {
   if (intro) {
     setIntroWord(introWordText());
     document.getElementById("mode-intro").classList.remove("revealed", "leaving", "needlogin");
+    renderRankedIntro(); // paint "N left today" / "out of plays" from the cached count
   }
   if (onHome && gameMode === "ranked" && rankedRevealed) {
     timerEl.textContent = fmtTime(TIMED_SEC); // 02:00 budget
@@ -1440,20 +1441,29 @@ function setMode(m) {
   refreshHomeTimer();
   refreshRankedTries();
 }
-// Show "N left today" under the Ranked word (signed in only; needs ranked-daily.sql).
-function setRankedTriesText(left) {
-  const el = document.getElementById("intro-tries");
-  el.textContent = left > 0 ? t("ranked.left", { n: left }) : t("ranked.none");
-  document.getElementById("mode-intro").classList.add("has-tries");
+// Daily ranked tries (needs ranked-daily.sql). `rankedTries`: cached count left
+// (null = unknown / no limit). The Ranked word shows "N left today", or once you're
+// out, "out of plays · <countdown to reset>" and the word stops opening.
+let rankedTries = null, rankedCountdown = null;
+function msToUtcMidnight() { const n = Date.now(), d = new Date(n); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - n; }
+function fmtToGo(ms) { ms = Math.max(0, ms); const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000); return h > 0 ? h + "h " + m + "m" : m + "m"; }
+function renderRankedIntro() {
+  const el = document.getElementById("intro-tries"), intro = document.getElementById("mode-intro");
+  clearInterval(rankedCountdown); rankedCountdown = null;
+  if (gameMode !== "ranked" || !authSession || rankedTries === null) { el.textContent = ""; intro.classList.remove("has-tries", "out-of-plays"); return; }
+  intro.classList.add("has-tries");
+  if (rankedTries > 0) { intro.classList.remove("out-of-plays"); el.textContent = t("ranked.left", { n: rankedTries }); }
+  else {
+    intro.classList.add("out-of-plays");
+    const paint = () => { el.textContent = t("ranked.out") + " · " + fmtToGo(msToUtcMidnight()); };
+    paint(); rankedCountdown = setInterval(paint, 30000);
+  }
 }
 async function refreshRankedTries() {
-  const el = document.getElementById("intro-tries"), intro = document.getElementById("mode-intro");
-  if (gameMode !== "ranked" || !authSession) { el.textContent = ""; intro.classList.remove("has-tries"); return; }
-  try {
-    const left = await (await import("./src/services/stats.js")).rankedTriesLeft();
-    if (left === null) { el.textContent = ""; intro.classList.remove("has-tries"); return; } // unknown -> no limit UI
-    setRankedTriesText(left);
-  } catch (e) {}
+  if (gameMode !== "ranked" || !authSession) { rankedTries = null; renderRankedIntro(); return; }
+  try { const left = await (await import("./src/services/stats.js")).rankedTriesLeft(); rankedTries = (left === null ? null : left); }
+  catch (e) { rankedTries = null; }
+  renderRankedIntro();
 }
 // Tapping the Ranked/Practice intro word fades it away and reveals the game beneath
 // (Ranked additionally shows its 02:00 budget; Practice has no timer).
@@ -2833,6 +2843,7 @@ function beginEntrance() {
       document.body.classList.contains("entering")) return;
   practiceGame = homeIsPractice(); // shared games never reach here as practice
   document.body.classList.toggle("practice", practiceGame);
+  if (gameMode === "ranked" && !sharedGame) consumeRankedTryForGame(); // a ranked game just started -> spend one of the 3 daily tries
   document.body.classList.remove("home-timer");
   initPages();
   layoutBorder();
@@ -3595,7 +3606,8 @@ function triggerIntroWord() {
   const intro = document.getElementById("mode-intro");
   if (gameMode === "multiplayer") { intro.classList.toggle("revealed"); return; }
   if (gameMode === "ranked" && !authSession) { intro.classList.toggle("needlogin"); return; }
-  revealMode(); // ranked (signed in) or practice
+  if (gameMode === "ranked" && rankedTries === 0) return; // out of daily plays — stuck on "out of plays"
+  revealMode(); // ranked (signed in, tries left) or practice
 }
 // The ENTIRE centred intro area is the button (the word alone is a tiny target, so
 // taps that miss it used to fall through to the stage's page navigation). A tap
@@ -4415,25 +4427,19 @@ function handleTargetPress() {
     // v2: click the target to place its value (usable once, like a number).
     const e = available.find((x) => x.isTarget && !x.tentative);
     if (e) playNumber(e);
-  } else if (gameMode === "ranked" && !sharedGame) {
-    startRankedRoll(); // ranked: each roll spends one of the 3 daily tries
   } else {
-    rollTarget();
+    rollTarget(); // ranked re-rolls are FREE — a try is only spent when the game starts (beginEntrance)
   }
 }
-// Ranked rolls are rate-limited (3/day). Spend a try, then roll — or refuse when
-// out. Degrades to a normal roll if the RPC is missing/offline (no limit yet).
-let rankedRolling = false;
-async function startRankedRoll() {
-  if (rankedRolling || isRollingTarget) return;
-  rankedRolling = true;
+// A ranked game just committed (all six drawn) -> spend one of the 3 daily tries.
+// Fire-and-forget; updates the "N left today" display. Degrades silently if the
+// RPC is absent/offline (no limit enforced).
+async function consumeRankedTryForGame() {
   try {
     const left = await (await import("./src/services/stats.js")).consumeRankedTry();
-    if (left === -1) { showToast(t("ranked.none")); refreshRankedTries(); return; }
-    rollTarget();
-    if (left !== null) setRankedTriesText(left);
-  } catch (e) { rollTarget(); }
-  finally { rankedRolling = false; }
+    if (left !== null && left >= 0) { rankedTries = left; }
+    else refreshRankedTries();
+  } catch (e) {}
 }
 
 function stopRoll() {
