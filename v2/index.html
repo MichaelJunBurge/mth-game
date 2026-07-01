@@ -3452,10 +3452,11 @@ function openMenu() {
   } else {
     sub.style.display = "none";
   }
-  // Shared games swap "Home" (which would lose the link) for Reset (closing the
-  // menu resumes, so there's no separate Resume button).
+  // Shared games hide "Home" (it would lose the link). Reset is gone entirely —
+  // replaying a shared puzzle was an unfair re-roll advantage; closing the menu
+  // resumes, and there's no Resume button either.
   const shared = !!sharedGame;
-  document.getElementById("menu-reset").style.display = shared ? "" : "none";
+  document.getElementById("menu-reset").style.display = "none";
   document.getElementById("menu-home").style.display = shared ? "none" : "";
   document.body.classList.add("menu-open");
 }
@@ -3597,7 +3598,7 @@ document.getElementById("guide-profile").addEventListener("click", () => openAcc
 document.getElementById("guide-rules").addEventListener("click", () => setGuideView("rules"));
 document.getElementById("guide-overview").addEventListener("click", () => setGuideView("overview"));
 document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => setGuideView("choice")));
-document.getElementById("guide-walk").addEventListener("click", () => { closeGuide(); startTour(); });
+document.getElementById("guide-walk").addEventListener("click", beginWalkthrough);
 // Tap the empty area of either overlay (not a button/control) to close it.
 menuEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, #menu-scale-wrap, button, input")) closeMenu(true); });
 guideEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, button, input, .auth-msg, .help-text, .games-body, .friends-body, .stats-body")) closeGuide(); });
@@ -4039,6 +4040,24 @@ function tourDemoCalc() {
   const a = available.find((e) => e.slotIndex === 0), b = available.find((e) => e.slotIndex === 2);
   if (a && b) { playNumber(a); playNumber(b); if (history.length === 0) evaluate(); }
 }
+// Launched from the help sheet. The walkthrough runs a throwaway demo that
+// overwrites the live game, so first remember what to return to — a shared game
+// still in its intro (replay it), any game in progress (snapshot + restore), or
+// nothing (home). We hide the sheet WITHOUT resuming so the capture is of the
+// paused state.
+let tourReturn = null;
+function beginWalkthrough() {
+  if (sharedGame && document.body.classList.contains("replay")) {
+    tourReturn = { shared: sharedGame, draws: introDraws.slice(), code: activeShareCode };
+  } else if (currentTarget !== null || document.body.classList.contains("playing")) {
+    saveState();
+    tourReturn = { snap: storage.getJSON(SAVE_KEY) };
+  } else {
+    tourReturn = null; // launched from a pristine home
+  }
+  document.body.classList.remove("guide-open");
+  startTour();
+}
 function startTour() {
   tourIndex = 0;
   setMode("practice");   // the demo needs the target/numbers, which the multiplayer page hides
@@ -4047,7 +4066,15 @@ function startTour() {
 }
 function endTour() {
   document.body.classList.remove("tour-on");
-  goHome();
+  const ret = tourReturn; tourReturn = null;
+  if (ret && ret.shared) {                 // resume the shared game from its intro (as if the sheet was closed)
+    sharedGame = ret.shared; introDraws = ret.draws.slice(); activeShareCode = ret.code;
+    restartShared();
+  } else if (ret && ret.snap) {            // pick the in-progress game back up
+    restoreState(ret.snap);
+  } else {
+    goHome();
+  }
 }
 function tourNext() {
   if (tourIndex >= TOUR_STEPS.length - 1) { endTour(); return; }
