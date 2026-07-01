@@ -17,6 +17,15 @@ export function onAuth(cb) {
 
 export async function signOut() { await supabase.auth.signOut(); }
 
+// Resolve a login identifier to an email: emails pass through; a username is looked
+// up (needs username-login.sql). Returns null if a username has no account.
+export async function resolveLoginEmail(identifier) {
+  const id = String(identifier).trim();
+  if (id.includes("@")) return id;
+  const { data, error } = await supabase.rpc("email_for_username", { p_uname: id });
+  return error ? null : (data || null);
+}
+
 // One button for both: try to sign in; if the account doesn't exist, create it.
 // Returns { status }:
 //   "signedin"     — logged in (session active)

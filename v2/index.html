@@ -874,7 +874,7 @@
     -webkit-appearance: none; appearance: none;
     width: min(55vw, 220px);
     height: 3px;
-    background: var(--grey);
+    background: var(--muted);
     border-radius: 2px;
     outline: none;
     margin: 0.4em 0;
@@ -997,7 +997,7 @@
     color: var(--ink);
     background: none;
     border: none;
-    border-bottom: 2px solid var(--dim);
+    border-bottom: 2px solid var(--muted);
     padding: 0.35em 0.2em;
     width: min(70vw, 260px);
     text-align: center;
@@ -1222,7 +1222,7 @@
     </div>
     <!-- Sign in / sign up (one action). -->
     <div class="menu-view guide-auth-view">
-      <input id="auth-email" class="auth-input" type="email" inputmode="email" autocomplete="email" placeholder="email" />
+      <input id="auth-email" class="auth-input" type="text" autocomplete="username" data-i18n-ph="auth.idField" placeholder="email or username" />
       <input id="auth-pass" class="auth-input" type="password" autocomplete="current-password" placeholder="password" />
       <div class="auth-msg" id="auth-msg"></div>
       <button id="auth-submit" class="menu-btn" data-i18n="auth.submit">log in / sign up</button>
@@ -3715,18 +3715,26 @@ function openAccount() {
   else showAccount(authUsername);
 }
 async function submitAuth() {
-  const email = document.getElementById("auth-email").value.trim();
+  const idField = document.getElementById("auth-email").value.trim();
   const pass = document.getElementById("auth-pass").value;
   const msg = document.getElementById("auth-msg");
-  if (!email || !pass) { msg.textContent = t("auth.needBoth"); return; }
+  if (!idField || !pass) { msg.textContent = t("auth.needBoth"); return; }
   msg.textContent = t("auth.working");
   try {
     const a = await authApi();
+    // Accept an email OR a username. A username with no account can't create one
+    // (sign up with your email), so don't fall through to a junk signup.
+    const email = await a.resolveLoginEmail(idField);
+    if (!email) { msg.textContent = t("auth.noUser"); return; }
     const r = await a.loginOrSignup(email, pass);
     if (r.status === "signedin") {
       document.getElementById("auth-pass").value = "";
       msg.textContent = "";
-      const s = await a.getSession(), u = await a.getUsername();
+      const s = await a.getSession();
+      let u = await a.getUsername();
+      // Retry once past a token-propagation race so an existing account with a
+      // username never wrongly lands on the "pick a username" page.
+      if (!u) { await new Promise((res) => setTimeout(res, 400)); u = await a.getUsername(); }
       applyAuthState(s, u);
       if (!u) { document.getElementById("username-msg").textContent = ""; setGuideView("username"); }
       else showAccount(u);
