@@ -38,6 +38,17 @@ export async function getStats() {
   return { totalPlayed: (prof.data && prof.data.games_played) || 0, ranked: res.data || [] };
 }
 
+// Daily ranked limit (needs v2/sql/ranked-daily.sql). Both return null on error
+// (RPC absent / offline) so the caller can fall back to "no limit".
+export async function rankedTriesLeft() {
+  const { data, error } = await supabase.rpc("ranked_tries_left");
+  return error ? null : data;      // 0..3, or null if unknown
+}
+export async function consumeRankedTry() {
+  const { data, error } = await supabase.rpc("consume_ranked_try");
+  return error ? null : data;      // remaining after spending, -1 if none left, null on error
+}
+
 // The global ranked standings (top players by points) + my own id to highlight me.
 export async function getLeaderboard() {
   const s = await getSession();

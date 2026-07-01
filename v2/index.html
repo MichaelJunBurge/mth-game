@@ -267,7 +267,7 @@
   .intro-letter.spinning { color: var(--dim); }
   /* "coming soon" is absolutely positioned just below the centred word, so showing
      it doesn't shift the word up — the word stays centred. */
-  .intro-soon, .intro-login {
+  .intro-soon, .intro-login, .intro-tries {
     position: absolute;
     top: 50%;
     left: 0;
@@ -284,6 +284,7 @@
   /* Ranked, logged out: tapping the word shows a tappable "log in to play". */
   .intro-login { background: none; border: none; cursor: pointer; text-decoration: underline; pointer-events: none; }
   .mode-intro.needlogin .intro-login { opacity: 0.85; pointer-events: auto; }
+  .mode-intro.has-tries .intro-tries { opacity: 0.6; }   /* Ranked, signed in: "N left today" */
   /* The game fades in gently when the Ranked intro is dismissed — slow enough to
      read as "this was behind the word", not a redirect. */
   @keyframes reveal-in { from { opacity: 0; } to { opacity: 1; } }
@@ -1170,6 +1171,7 @@
         <button id="intro-word" class="intro-word">Multiplayer</button>
         <div id="intro-soon" class="intro-soon" data-i18n="mp.soon">Coming soon</div>
         <button id="intro-login" class="intro-login" data-i18n="ranked.login">log in to play</button>
+        <div id="intro-tries" class="intro-tries"></div>
       </div>
     </div>
   </main>
@@ -1436,6 +1438,22 @@ function setMode(m) {
   gameMode = HOME_ORDER.includes(m) ? m : "practice";
   storage.set(MODE_KEY, gameMode);
   refreshHomeTimer();
+  refreshRankedTries();
+}
+// Show "N left today" under the Ranked word (signed in only; needs ranked-daily.sql).
+function setRankedTriesText(left) {
+  const el = document.getElementById("intro-tries");
+  el.textContent = left > 0 ? t("ranked.left", { n: left }) : t("ranked.none");
+  document.getElementById("mode-intro").classList.add("has-tries");
+}
+async function refreshRankedTries() {
+  const el = document.getElementById("intro-tries"), intro = document.getElementById("mode-intro");
+  if (gameMode !== "ranked" || !authSession) { el.textContent = ""; intro.classList.remove("has-tries"); return; }
+  try {
+    const left = await (await import("./src/services/stats.js")).rankedTriesLeft();
+    if (left === null) { el.textContent = ""; intro.classList.remove("has-tries"); return; } // unknown -> no limit UI
+    setRankedTriesText(left);
+  } catch (e) {}
 }
 // Tapping the Ranked/Practice intro word fades it away and reveals the game beneath
 // (Ranked additionally shows its 02:00 budget; Practice has no timer).
@@ -3675,6 +3693,7 @@ function applyAuthState(session, username) {
   if (session) document.getElementById("mode-intro").classList.remove("needlogin"); // signed in -> drop the ranked gate prompt
   document.getElementById("nav-help").setAttribute("aria-label", session ? t("auth.profile") : t("auth.help"));
   document.getElementById("guide-profile").textContent = session ? (username || t("auth.setName")) : t("auth.signin");
+  refreshRankedTries(); // show/clear "N left today" under the Ranked word
 }
 function showAccount(u) { document.getElementById("account-msg").textContent = t("auth.helloName", { u }); setGuideView("account"); }
 // Route the account button by state: sign-in form / username setup / account.
@@ -4396,9 +4415,25 @@ function handleTargetPress() {
     // v2: click the target to place its value (usable once, like a number).
     const e = available.find((x) => x.isTarget && !x.tentative);
     if (e) playNumber(e);
+  } else if (gameMode === "ranked" && !sharedGame) {
+    startRankedRoll(); // ranked: each roll spends one of the 3 daily tries
   } else {
     rollTarget();
   }
+}
+// Ranked rolls are rate-limited (3/day). Spend a try, then roll — or refuse when
+// out. Degrades to a normal roll if the RPC is missing/offline (no limit yet).
+let rankedRolling = false;
+async function startRankedRoll() {
+  if (rankedRolling || isRollingTarget) return;
+  rankedRolling = true;
+  try {
+    const left = await (await import("./src/services/stats.js")).consumeRankedTry();
+    if (left === -1) { showToast(t("ranked.none")); refreshRankedTries(); return; }
+    rollTarget();
+    if (left !== null) setRankedTriesText(left);
+  } catch (e) { rollTarget(); }
+  finally { rankedRolling = false; }
 }
 
 function stopRoll() {
