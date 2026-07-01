@@ -856,6 +856,15 @@
   /* Icon-only menu entry (profile / help). */
   .menu-icon-btn { display: flex; align-items: center; justify-content: center; padding: 0.1em; }
   .menu-icon-btn svg { width: calc(var(--size-ui) * 1.7); height: calc(var(--size-ui) * 1.7); display: block; }
+  /* Size control: a "size (N%)" label above the slider, matching the button text. */
+  .menu-scale-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.6em; }
+  .menu-scale-label {
+    font-family: var(--font);
+    font-size: var(--size-ui);
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--ink);
+  }
   /* Size slider — shrinks the whole game column (small ↔ large). Fixed px sizes
      so it stays usable at any scale. */
   .menu-slider {
@@ -1186,7 +1195,10 @@
       <button id="menu-sign" class="menu-btn">Auto (×)</button>
       <button id="menu-theme" class="menu-btn">Dark mode</button>
       <button id="menu-lang" class="menu-btn">language (english)</button>
-      <input id="menu-scale" class="menu-slider" type="range" min="0.6" max="1" step="0.1" value="1" aria-label="Size" />
+      <div id="menu-scale-wrap" class="menu-scale-wrap">
+        <div id="menu-scale-label" class="menu-scale-label">size (100%)</div>
+        <input id="menu-scale" class="menu-slider" type="range" min="0.6" max="1" step="0.1" value="1" aria-label="Size" />
+      </div>
     </div>
   </div>
 
@@ -3301,6 +3313,7 @@ function applyLang() {
   applyAutoEqual(autoEqual);
   applyAutoSign(autoSign);
   document.getElementById("menu-lang").textContent = t("menu.lang");
+  applyScale(document.documentElement.style.getPropertyValue("--scale") || 1); // re-label "size (N%)"
   const sub = document.getElementById("menu-submit");
   if (sub.style.display !== "none") sub.textContent = allUsedUp() ? t("submit") : t("quit");
   renderHelp();
@@ -3365,6 +3378,8 @@ function applyScale(v) {
   document.documentElement.style.setProperty("--scale", String(s));
   const slider = document.getElementById("menu-scale");
   if (slider) slider.value = String(s);
+  const lbl = document.getElementById("menu-scale-label");
+  if (lbl) lbl.textContent = t("menu.size", { p: Math.round(s * 100) });
   onViewportResize();
 }
 function setScale(v) {
@@ -3566,7 +3581,7 @@ document.getElementById("guide-overview").addEventListener("click", () => setGui
 document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => setGuideView("choice")));
 document.getElementById("guide-walk").addEventListener("click", () => { closeGuide(); startTour(); });
 // Tap the empty area of either overlay (not a button/control) to close it.
-menuEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, #menu-scale, button, input")) closeMenu(true); });
+menuEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, #menu-scale-wrap, button, input")) closeMenu(true); });
 guideEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, button, input, .auth-msg, .help-text, .games-body, .friends-body, .stats-body")) closeGuide(); });
 
 /* ---------------- Account / profile (Supabase, lazy-loaded) ----------------
