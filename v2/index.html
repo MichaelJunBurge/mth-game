@@ -266,7 +266,15 @@
      up/down as descenders cycle through — they only settle in colour when locked. */
   .intro-letter { transition: color 0.12s ease; }
   .intro-letter.spinning { color: var(--dim); }
+  /* "coming soon" is absolutely positioned just below the centred word, so showing
+     it doesn't shift the word up — the word stays centred. */
   .intro-soon {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    transform: translateY(2.6em);
+    text-align: center;
     color: var(--muted, var(--ink));
     font-family: var(--font);
     opacity: 0;
@@ -439,14 +447,16 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    /* Keep content clear of the notch / home indicator (0 on desktop). Extra
-       bottom padding lifts the centred column up a touch so the keypad-heavy game
-       reads as optically centred rather than sitting low. */
+    /* Keep content clear of the notch / home indicator (0 on desktop). */
     padding: calc(24px + env(safe-area-inset-top, 0px))
              calc(24px + env(safe-area-inset-right, 0px))
-             calc(24px + 6dvh + env(safe-area-inset-bottom, 0px))
+             calc(24px + env(safe-area-inset-bottom, 0px))
              calc(24px + env(safe-area-inset-left, 0px));
   }
+  /* Only DURING play does the extra bottom padding lift the keypad-heavy column so
+     it reads as optically centred; home + the Ranked/Multiplayer intro stay at
+     true centre. */
+  body.playing .stage { padding-bottom: calc(24px + 6dvh + env(safe-area-inset-bottom, 0px)); }
   /* One centered column whose width is the shared --app-w. Spacing is on the
      children (not a flex gap) so the collapsed calculator adds no gap on home. */
   .content {
@@ -2554,6 +2564,24 @@ stageEl.addEventListener("click", (e) => {
     commitModeSwipe(e.clientX > window.innerWidth / 2); // tap right -> right neighbour enters from the right (like the game pages)
   }
 });
+// Desktop trackpad: a two-finger HORIZONTAL swipe navigates like a mobile swipe
+// (and suppresses the browser's back/forward gesture). deltaX is roughly the
+// inverse of finger movement, so dx = -accumulated deltaX.
+let wheelX = 0, wheelResetTimer = null, wheelLock = false;
+stageEl.addEventListener("wheel", (e) => {
+  if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;   // vertical scroll — leave it alone
+  if (animating || tourOrOverlayOpen()) return;
+  e.preventDefault();
+  clearTimeout(wheelResetTimer);
+  wheelResetTimer = setTimeout(() => { wheelX = 0; wheelLock = false; }, 160); // gesture ends after a quiet gap
+  if (wheelLock) return;
+  wheelX += e.deltaX;
+  if (Math.abs(wheelX) < 40) return;
+  const dx = -wheelX;
+  wheelLock = true; wheelX = 0;
+  if (document.body.classList.contains("playing")) commitSwipe(dx > 0 ? 1 : -1);
+  else if (canHomeModeSwipe()) commitModeSwipe(dx < 0);
+}, { passive: false });
 stageEl.addEventListener("pointermove", (e) => {
   if (longPressTimer && (Math.abs(e.clientX - swipeX) > 10 || Math.abs(e.clientY - swipeY) > 10)) cancelLongPress();
   if (!swiping || swipeDone) return;
