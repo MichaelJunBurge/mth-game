@@ -4337,13 +4337,12 @@ function playIntro(t, nums, draws, gate) {
     reels[idx].textContent = pbTargetDigits[idx];
     reels[idx].classList.remove("spinning"); reels[idx].classList.add("lock");
   } }));
-  // A shared link opens the help/profile sheet (log in / how to play) as soon as the
-  // target has rolled but BEFORE the numbers draw, and PAUSES there; closing the sheet
-  // resumes the draws. So the recipient can sign in or read the rules first, then start.
-  if (gate) {
-    const firstDraw = draws.length ? Math.min(...draws.map((d) => d.t)) : 1600;
-    ev.push({ t: Math.max(1451, firstDraw - 1), fn: () => { openGuide(); } });
-  }
+  // A shared link opens the help/profile sheet (log in / how to play) at the VERY
+  // START and PAUSES there — before the target even rolls — so nothing is revealed
+  // until the recipient closes the sheet. Closing it resumes the whole intro (target
+  // roll → number draws → play) from the beginning. (t:-1 so it fires before the t:0
+  // roll event; pbTick breaks its loop the moment the pause lands, so the roll waits.)
+  if (gate) ev.push({ t: -1, fn: () => { openGuide(); } });
   // number draws at their recorded times
   let maxEnd = 1450;
   draws.forEach((d) => {
