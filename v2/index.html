@@ -231,10 +231,15 @@
     justify-content: center;
     gap: 0.6em;
     min-height: 40dvh;
+    width: 100%;                 /* fill the content column so horizontal taps are forgiving */
+    cursor: pointer;             /* the WHOLE centred area is the button, not just the word */
+    position: relative;
+    z-index: 60;                 /* on the top layer so nothing can shadow the press */
     opacity: 1;
     transition: opacity 0.3s ease;
   }
   body.mode-intro-on .mode-intro { display: flex; }
+  .mode-intro:hover .intro-word { transform: scale(1.14); } /* hovering the area enlarges the word */
   body.mode-intro-on #target,
   body.mode-intro-on #slots,
   body.mode-intro-on .calcwrap { display: none; }
@@ -3394,17 +3399,22 @@ function restartShared() {
 timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-help").addEventListener("click", openGuide);
-// Mode intro word action: Ranked fades away to reveal the game; Multiplayer
-// reveals "Coming soon". Fired by tapping the word OR the centre band around it.
+// Mode intro action: Ranked fades away to reveal the game; Multiplayer toggles
+// "Coming soon".
 function triggerIntroWord() {
   if (gameMode === "ranked") revealRanked();
   else document.getElementById("mode-intro").classList.toggle("revealed"); // multiplayer: tap toggles "coming soon"
 }
-document.getElementById("intro-word").addEventListener("click", triggerIntroWord);
-// Keep word presses from feeding the stage's swipe tracking, so a tap on the word
-// is always a clean button press — never mis-read as a swipe/navigation.
-["pointerdown", "pointerup", "pointermove"].forEach((ev) =>
-  document.getElementById("intro-word").addEventListener(ev, (e) => e.stopPropagation()));
+// The ENTIRE centred intro area is the button (the word alone is a tiny target, so
+// taps that miss it used to fall through to the stage's page navigation). A tap
+// anywhere in the area acts on the word; stopPropagation stops the stage's click-
+// nav from also firing; the `animating` guard ignores the trailing click right
+// after a real swipe. Only the surrounding margins navigate.
+document.getElementById("mode-intro").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (gestureMoved) return; // this interaction was a swipe (a drag navigated) — don't also reveal
+  triggerIntroWord();
+});
 document.getElementById("menu-lang").addEventListener("click", toggleLang);
 
 // Drag-to-close on the overlays: the open sheet follows the finger back toward
