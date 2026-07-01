@@ -857,7 +857,7 @@
   }
   .menu-btn:hover { transform: scale(1.12); }
   .guide-qmark { font-size: calc(var(--size-ui) * 1.3); font-weight: 700; }
-  .account-username { font-weight: 700; text-decoration: underline; }   /* tap to open settings */
+  .account-username { font-weight: 700; }   /* tap to open settings */
   /* Icon-only menu entry (profile / help). */
   .menu-icon-btn { display: flex; align-items: center; justify-content: center; padding: 0.1em; }
   .menu-icon-btn svg { width: calc(var(--size-ui) * 1.7); height: calc(var(--size-ui) * 1.7); display: block; }
@@ -1211,7 +1211,7 @@
       <button id="menu-lang" class="menu-btn">language (english)</button>
       <div id="menu-scale-wrap" class="menu-scale-wrap">
         <div id="menu-scale-label" class="menu-scale-label">size (100%)</div>
-        <input id="menu-scale" class="menu-slider" type="range" min="0.5" max="1" step="0.1" value="0.5" aria-label="Size" />
+        <input id="menu-scale" class="menu-slider" type="range" min="0.6" max="1" step="0.1" value="0.8" aria-label="Size" />
       </div>
     </div>
   </div>
@@ -3490,7 +3490,7 @@ function toggleTheme() {
 // Spacing stays put (timer/dots are dvh-based) and the column stays centred; the
 // JS-positioned bits (page-x, submit, beat, ring, sketch) re-measure after.
 function applyScale(v) {
-  const s = Math.max(0.5, Math.min(1, Number(v) || 0.5));
+  const s = Math.max(0.6, Math.min(1, Number(v) || 0.8));
   document.documentElement.style.setProperty("--scale", String(s));
   const slider = document.getElementById("menu-scale");
   if (slider) slider.value = String(s);
@@ -3703,7 +3703,8 @@ function closeGuide() {
   resumeFromOverlay();
 }
 document.getElementById("guide-profile").addEventListener("click", () => openAccount());
-document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => setGuideView("choice")));
+// Back returns to the account/profile page when signed in, else the choice screen.
+document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => { if (authSession) openAccount(); else setGuideView("choice"); }));
 // How to play / rules / walkthrough — shared buttons on the choice screen and in
 // the "?" folder (data-help, so they can appear in both without duplicate ids).
 guideEl.addEventListener("click", (e) => {
@@ -4717,7 +4718,7 @@ sizeSketch();
 setLang(storage.get(LANG_KEY) === "ko" ? "ko" : "en");
 gameMode = "practice"; // always open on practice so ranked games are never started by accident
 applyTheme(storage.get(THEME_KEY) || "light");
-applyScale(storage.get(SCALE_KEY) || 0.5); // default size 50%
+applyScale(storage.get(SCALE_KEY) || 0.8); // default: slider centred (80%)
 applyAutoEqual((storage.get(AUTOEQ_KEY) || "on") !== "off");
 applyAutoSign(storage.get(AUTOSIGN_KEY) || "x");
 applyLang();
