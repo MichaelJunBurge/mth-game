@@ -4110,17 +4110,28 @@ applyAuthState(null, null); // default: signed out
 
 // The walkthrough drives a quick demo and points a spotlight + note at each part.
 const TOUR_STEPS = [
-  { setup: () => { goHome(); }, el: () => targetEl },
-  { setup: () => { tourSetTarget(); }, el: () => slotsEl.children[0] },
-  { setup: () => { tourFillNumbers(); }, el: () => slotsEl },
-  { setup: () => { tourDemoCalc(); }, el: () => historyWrapEl },   // where sums show
-  { setup: () => {}, el: () => dotsEl },                           // page dots
-  { setup: () => {}, el: () => timerEl },                          // menu / help / submit
-  { setup: () => {}, el: () => null },                             // scoring (centred note)
+  { setup: () => { tourShowIntro(); }, el: () => document.getElementById("mode-intro") }, // modes / carousel nav
+  { setup: () => { tourSetTarget(); }, el: () => targetEl },        // target (game revealed)
+  { setup: () => { tourFillNumbers(); }, el: () => slotsEl },       // the six numbers
+  { setup: () => { tourDemoCalc(); }, el: () => historyWrapEl },    // build a calc + the tape
+  { setup: () => {}, el: () => dotsEl },                            // pages + sketchpad
+  { setup: () => {}, el: () => timerEl },                           // menu / help+profile swipes
+  { setup: () => {}, el: () => null },                             // submit + scoring + modes recap
 ];
 let tourIndex = 0;
+// Step 0: the home carousel with the Practice intro word up (nav lesson).
+function tourShowIntro() {
+  goHome();
+  setMode("practice");
+  practiceRevealed = false;
+  document.body.classList.remove("playing", "entering", "won", "raised");
+  refreshHomeTimer();   // -> mode-intro-on: the "practice" word shows
+}
+// Step 1: reveal the board past the intro word + roll a demo target.
 function tourSetTarget() {
   goHome();
+  document.body.classList.remove("mode-intro-on"); // past the intro word — show the board
+  practiceRevealed = true;
   currentTarget = 642;
   "642".split("").forEach((d, i) => { if (reels[i]) { reels[i].textContent = d; reels[i].className = "reel"; } });
   setArrowsEnabled(true);
