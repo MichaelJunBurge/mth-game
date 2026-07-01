@@ -17,6 +17,25 @@ export function onAuth(cb) {
 
 export async function signOut() { await supabase.auth.signOut(); }
 
+// Account settings.
+export async function changeEmail(email) {
+  const { error } = await supabase.auth.updateUser({ email: String(email).trim() });
+  return { ok: !error, message: error ? error.message : null };
+}
+export async function changePassword(password) {
+  const { error } = await supabase.auth.updateUser({ password });
+  return { ok: !error, message: error ? error.message : null };
+}
+export async function resetAccount() {
+  const { error } = await supabase.rpc("reset_my_account");
+  return { ok: !error, message: error ? error.message : null };
+}
+export async function deleteAccount() {
+  const { error } = await supabase.rpc("delete_my_account");
+  if (!error) await supabase.auth.signOut();
+  return { ok: !error, message: error ? error.message : null };
+}
+
 // Resolve a login identifier to an email: emails pass through; a username is looked
 // up (needs username-login.sql). Returns null if a username has no account.
 export async function resolveLoginEmail(identifier) {

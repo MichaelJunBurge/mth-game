@@ -857,6 +857,7 @@
   }
   .menu-btn:hover { transform: scale(1.12); }
   .guide-qmark { font-size: calc(var(--size-ui) * 1.3); font-weight: 700; }
+  .account-username { font-weight: 700; text-decoration: underline; }   /* tap to open settings */
   /* Icon-only menu entry (profile / help). */
   .menu-icon-btn { display: flex; align-items: center; justify-content: center; padding: 0.1em; }
   .menu-icon-btn svg { width: calc(var(--size-ui) * 1.7); height: calc(var(--size-ui) * 1.7); display: block; }
@@ -931,11 +932,12 @@
   #guide[data-view="groupdetail"] .guide-groupdetail-view,
   #guide[data-view="sharepick"] .guide-sharepick-view,
   #guide[data-view="help"] .guide-help-view,
+  #guide[data-view="settings"] .guide-settings-view,
   #guide[data-view="leaderboard"] .guide-leaderboard-view,
   #guide[data-view="h2h"] .guide-h2h-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="sharepick"]):not([data-view="help"]):not([data-view="leaderboard"]):not([data-view="h2h"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="sharepick"]):not([data-view="help"]):not([data-view="settings"]):not([data-view="leaderboard"]):not([data-view="h2h"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
   /* Active games list. */
   .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
   .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
@@ -1247,9 +1249,9 @@
       <button id="username-save" class="menu-btn" data-i18n="auth.save">save</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
     </div>
-    <!-- Signed-in account (challenges come later). -->
+    <!-- Signed-in account. The username opens settings. -->
     <div class="menu-view guide-account-view">
-      <div class="help-text" id="account-msg"></div>
+      <button id="account-username" class="menu-btn account-username"></button>
       <button id="account-games" class="menu-btn" data-i18n="games.title">active games</button>
       <button id="account-groups" class="menu-btn" data-i18n="groups.title">groups</button>
       <button id="account-leaderboard" class="menu-btn" data-i18n="lb.title">leaderboard</button>
@@ -1257,7 +1259,17 @@
       <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
       <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
       <button id="account-help" class="menu-btn guide-qmark" aria-label="help">?</button>
+    </div>
+    <!-- Account settings (opened by tapping the username). -->
+    <div class="menu-view guide-settings-view">
+      <button id="set-username" class="menu-btn" data-i18n="set.username">change username</button>
+      <button id="set-email" class="menu-btn" data-i18n="set.email">change email</button>
+      <button id="set-password" class="menu-btn" data-i18n="set.password">change password</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
+      <button id="set-reset" class="menu-btn danger" data-i18n="set.reset">reset account</button>
+      <button id="set-delete" class="menu-btn danger" data-i18n="set.delete">delete account</button>
+      <div class="auth-msg" id="settings-msg"></div>
+      <button id="settings-back" class="menu-btn back-btn" data-i18n="menu.back">Back</button>
     </div>
     <!-- Global ranked leaderboard. -->
     <div class="menu-view guide-leaderboard-view">
@@ -3727,7 +3739,15 @@ function applyAuthState(session, username) {
   document.getElementById("guide-profile").textContent = session ? (username || t("auth.setName")) : t("auth.signin");
   refreshRankedTries(); // show/clear "N left today" under the Ranked word
 }
-function showAccount(u) { document.getElementById("account-msg").textContent = t("auth.helloName", { u }); setGuideView("account"); }
+function showAccount(u) { document.getElementById("account-username").textContent = u || ""; setGuideView("account"); }
+// Account settings (tap the username). Uses native prompt/confirm for these rare
+// actions; reset/delete confirm TWICE. authApi()/showToast/applyAuthState in scope.
+function openSettings() { document.getElementById("settings-msg").textContent = ""; setGuideView("settings"); }
+async function settingsAction(fn, okKey) {
+  const msg = document.getElementById("settings-msg"); msg.textContent = t("auth.working");
+  try { const r = await fn(); msg.textContent = r.ok ? t(okKey) : (r.message || t("auth.err")); return r; }
+  catch (e) { msg.textContent = t("auth.offline"); return { ok: false }; }
+}
 // Route the account button by state: sign-in form / username setup / account.
 function openAccount() {
   if (!authSession) { setGuideView("auth"); setTimeout(() => { const e = document.getElementById("auth-email"); if (e) e.focus(); }, 60); }
@@ -3782,6 +3802,31 @@ document.querySelectorAll(".guide-signout").forEach((b) => b.addEventListener("c
   applyAuthState(null, null);
   setGuideView("choice");
 }));
+// ---- Account settings ----
+document.getElementById("account-username").addEventListener("click", openSettings);
+document.getElementById("settings-back").addEventListener("click", () => showAccount(authUsername));
+document.getElementById("set-username").addEventListener("click", async () => {
+  const name = prompt(t("set.newUsername")); if (name == null) return;
+  const r = await settingsAction(async () => (await authApi()).setUsername(name), "set.done");
+  if (r.ok) applyAuthState(authSession, r.username);
+});
+document.getElementById("set-email").addEventListener("click", async () => {
+  const email = prompt(t("set.newEmail")); if (email == null || !email.trim()) return;
+  await settingsAction(async () => (await authApi()).changeEmail(email), "set.emailSent");
+});
+document.getElementById("set-password").addEventListener("click", async () => {
+  const pw = prompt(t("set.newPassword")); if (pw == null || !pw) return;
+  await settingsAction(async () => (await authApi()).changePassword(pw), "set.done");
+});
+document.getElementById("set-reset").addEventListener("click", async () => {
+  if (!confirm(t("set.resetConfirm1")) || !confirm(t("set.resetConfirm2"))) return; // ask twice
+  await settingsAction(async () => (await authApi()).resetAccount(), "set.resetDone");
+});
+document.getElementById("set-delete").addEventListener("click", async () => {
+  if (!confirm(t("set.deleteConfirm1")) || !confirm(t("set.deleteConfirm2"))) return; // ask twice
+  const r = await settingsAction(async () => (await authApi()).deleteAccount(), "set.deleteDone");
+  if (r.ok) { applyAuthState(null, null); closeGuide(); showToast(t("set.deleteDone")); }
+});
 
 // ---- Ranked stats view ----
 document.getElementById("account-stats").addEventListener("click", openStats);
