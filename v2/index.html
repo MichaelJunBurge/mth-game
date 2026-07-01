@@ -248,7 +248,7 @@
     font-size: var(--size-ui);                   /* match the menu text size */
     font-weight: 700;
     letter-spacing: 0.15em;                      /* same as the menu buttons */
-    padding: 0.3em 0.5em;
+    padding: 1em 1.4em;                          /* comfortable button hit area — press on the word to select */
     transition: opacity 0.15s ease, transform 0.08s;
   }
   .intro-word:hover { opacity: 0.85; }
@@ -1720,11 +1720,14 @@ function refreshSlots() {
   document.body.classList.toggle("all-used", allUsedUp());
 }
 
-// True once everything's been combined into one line: all six numbers used and
-// no freed result chips left (the target is optional).
+// True once everything's collapsed to a single value: all six numbers used with
+// at most one loose result left — that one being the final answer, whether it's
+// still on the line or was banked with = (which frees it as a chip). More than
+// one loose result means the working isn't finished. (Target is optional.)
 function allUsedUp() {
   if (SLOT_COUNT === 0 || !slotUsed.every(Boolean)) return false;
-  return !available.some((e) => e.slotIndex === null && !e.isTarget && e !== lineEntry && !e.tentative);
+  const loose = available.filter((e) => e.slotIndex === null && !e.isTarget && e !== lineEntry && !e.tentative);
+  return loose.length <= 1;
 }
 
 // The generated-numbers row shows only FREED results (as reminders). A result
@@ -2423,14 +2426,9 @@ stageEl.addEventListener("click", (e) => {
     else if (e.clientX > r.right) pageRight();
     else if (document.body.classList.contains("tape-open")) collapseTape(); // centre tap closes the tape
   } else if (canHomeModeSwipe()) {
-    // On the Ranked/Multiplayer intro, the whole centre band acts on the word
-    // (the word itself is a tiny target); only the side margins navigate.
-    if (document.body.classList.contains("mode-intro-on") &&
-        Math.abs(e.clientX - window.innerWidth / 2) < window.innerWidth * 0.25) {
-      triggerIntroWord();
-    } else {
-      commitModeSwipe(e.clientX > window.innerWidth / 2); // tap right -> right neighbour enters from the right (like the game pages)
-    }
+    // Ranked/Multiplayer word is a real button (padded hit area) — pressing it
+    // reveals; anywhere else here slides to the neighbouring page.
+    commitModeSwipe(e.clientX > window.innerWidth / 2); // tap right -> right neighbour enters from the right (like the game pages)
   }
 });
 stageEl.addEventListener("pointermove", (e) => {
