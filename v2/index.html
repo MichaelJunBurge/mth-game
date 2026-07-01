@@ -1369,12 +1369,18 @@ const HOME_ORDER = ["multiplayer", "practice", "ranked"];
 let gameMode = "practice";   // which home page is showing: "practice" | "ranked" | "multiplayer"
 let practiceGame = false;    // the in-progress game has no timer/border (set at start)
 let rankedRevealed = false;  // the Ranked intro word has been tapped -> show the game
+let practiceRevealed = false; // same, for the Practice page (no timer once revealed)
 // On the home screen, your own game is "practice" only if that's the chosen mode
 // (a shared game always runs ranked/timed — you're racing the sender's time).
 function homeIsPractice() { return gameMode === "practice" && !sharedGame; }
-// The Ranked and Multiplayer pages open as a single centred word (an "intro").
-// Ranked drops its intro once tapped (revealing the game); Multiplayer keeps it.
-function introActive() { return gameMode === "multiplayer" || (gameMode === "ranked" && !rankedRevealed); }
+// Every home page opens as a single centred word (an "intro") so they all look and
+// behave the same. Ranked and Practice drop their intro once tapped (revealing the
+// game beneath); Multiplayer keeps it (its word toggles "coming soon").
+function introActive() {
+  return gameMode === "multiplayer" ||
+         (gameMode === "ranked" && !rankedRevealed) ||
+         (gameMode === "practice" && !practiceRevealed);
+}
 // Show the time budget at the top on home: 2:00 once a ranked game is revealed,
 // the sender's time-to-beat for a shared game; nothing otherwise. Also drive the
 // Ranked/Multiplayer intro word (hidden target + numbers behind it).
@@ -1400,8 +1406,9 @@ function setMode(m) {
   storage.set(MODE_KEY, gameMode);
   refreshHomeTimer();
 }
-// Tapping the "Ranked" intro word fades it away and reveals the game beneath.
-function revealRanked() {
+// Tapping the Ranked/Practice intro word fades it away and reveals the game beneath
+// (Ranked additionally shows its 02:00 budget; Practice has no timer).
+function revealMode() {
   const intro = document.getElementById("mode-intro");
   if (intro.classList.contains("leaving")) return;
   setIntroWord(introWordText());               // snap to the finished word before fading (if tapped mid-flicker)
@@ -1412,8 +1419,8 @@ function revealRanked() {
     if (done) return;
     done = true;
     intro.removeEventListener("transitionend", once);
-    rankedRevealed = true;
-    refreshHomeTimer();                       // drops the intro, shows target + 02:00
+    if (gameMode === "ranked") rankedRevealed = true; else practiceRevealed = true;
+    refreshHomeTimer();                       // drops the intro, shows target (+ 02:00 for ranked)
     contentEl.classList.add("reveal-in");
     setTimeout(() => contentEl.classList.remove("reveal-in"), 650);
   };
@@ -1457,7 +1464,13 @@ function animateIntroWord(text) {
     }, START + i * 70));
   });
 }
-function introWordText() { return t(gameMode === "ranked" ? "mode.ranked" : "mp.title"); }
+function introWordText() {
+  return t(gameMode === "ranked" ? "mode.ranked" : gameMode === "practice" ? "mode.practice" : "mp.title");
+}
+// The intro word for a SHARED game (the sender's game type). Translated here at
+// module scope because playSharedData/playIntro shadow the translate `t` with the
+// target number. Multiplayer isn't shareable yet, so it's practice-or-ranked.
+function modeWordFor(practice) { return t(practice ? "mode.practice" : "mode.ranked"); }
 
 /* ---------------- Chevron arrows (identical up/down) ---------------- */
 function chevron(dir) {
@@ -2502,7 +2515,7 @@ function nextHomeMode(goRight) {
 function commitModeSwipe(goRight) { // goRight: go to the right neighbour (new page enters from the right)
   swipeDone = true; animating = true;
   const W = window.innerWidth, s = goRight ? -1 : 1; // old page exits AWAY from the new one (it enters from the tapped side)
-  rankedRevealed = false;                            // each landing on Ranked re-shows its intro
+  rankedRevealed = false; practiceRevealed = false;  // each landing on a page re-shows its intro word
   clearIntroAnim();                                  // stop the outgoing page's letters
   document.getElementById("mode-intro").classList.remove("revealed", "leaving");
   contentEl.style.transition = "transform 0.16s ease-in";
@@ -2816,6 +2829,7 @@ function backToHome() {
   resetCalc();
   stopTimer();
   resetSlots();
+  rankedRevealed = false; practiceRevealed = false; // returning home re-shows the page's intro word
   currentTarget = null; // pristine home: target back to 000 (also re-enables mode-swipe)
   reels.forEach((r) => { r.textContent = "0"; r.className = "reel"; });
   history = [];
@@ -3440,7 +3454,7 @@ function restartShared() {
   if (!sharedGame) return;
   const sg = sharedGame, draws = introDraws.slice(), code = activeShareCode;
   if (draws.length === SLOT_COUNT) {
-    playIntro(sg.t, sg.n, draws);   // backToHome inside clears shared state
+    playIntro(sg.t, sg.n, draws, modeWordFor(!!sg.practice));   // backToHome inside clears shared state
   } else {
     backToHome();
     currentTarget = sg.t;
@@ -3464,11 +3478,11 @@ function restartShared() {
 timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-help").addEventListener("click", openGuide);
-// Mode intro action: Ranked fades away to reveal the game; Multiplayer toggles
-// "Coming soon".
+// Mode intro action: Ranked/Practice fade away to reveal the game; Multiplayer
+// toggles "Coming soon".
 function triggerIntroWord() {
-  if (gameMode === "ranked") revealRanked();
-  else document.getElementById("mode-intro").classList.toggle("revealed"); // multiplayer: tap toggles "coming soon"
+  if (gameMode === "multiplayer") document.getElementById("mode-intro").classList.toggle("revealed"); // tap toggles "coming soon"
+  else revealMode(); // ranked or practice
 }
 // The ENTIRE centred intro area is the button (the word alone is a tiny target, so
 // taps that miss it used to fall through to the stage's page navigation). A tap
@@ -4116,7 +4130,8 @@ function playSharedData(data, code) {
   const hasIntro = Array.isArray(data.intro) && data.intro.length === SLOT_COUNT &&
     data.intro.every((d) => d && typeof d.i === "number" && typeof d.t === "number");
   if (hasIntro) {
-    playIntro(t, nums, data.intro); // does backToHome, then sets up + schedules the replay
+    // Announce the game type first (the sender's mode), then replay the target roll.
+    playIntro(t, nums, data.intro, modeWordFor(!!data.pr)); // does backToHome, sets up + schedules the replay
     activeShareCode = code || null; // backToHome cleared it
     setShared();
     return true;
@@ -4255,7 +4270,7 @@ function pbStop() {
   pbSpinSlot = new Array(SLOT_COUNT).fill(false);
 }
 
-function playIntro(t, nums, draws) {
+function playIntro(t, nums, draws, modeWord) {
   backToHome();                       // clean slate (clears replay/intro)
   replaying = true;
   document.body.classList.add("replay");
@@ -4273,9 +4288,29 @@ function playIntro(t, nums, draws) {
   pbSpinSlot = new Array(SLOT_COUNT).fill(false);
 
   const ev = [];
+  // Shared games announce the game type first: the mode word cycles in, holds, then
+  // fades away — exactly like the home intro — and only then does the target roll
+  // begin beneath it. `base` offsets the whole roll timeline by the word phase.
+  let base = 0;
+  if (modeWord) {
+    const WORD_HOLD = 1150, WORD_FADE = 360;
+    ev.push({ t: 0, fn: () => {
+      const intro = document.getElementById("mode-intro");
+      intro.classList.remove("revealed", "leaving");
+      document.body.classList.add("mode-intro-on");   // hides target/slots/calc behind the word
+      animateIntroWord(modeWord);                      // slot-machine letters, like the home pages
+    } });
+    ev.push({ t: WORD_HOLD, fn: () => { document.getElementById("mode-intro").classList.add("leaving"); } });
+    ev.push({ t: WORD_HOLD + WORD_FADE, fn: () => {
+      clearIntroAnim();
+      document.body.classList.remove("mode-intro-on"); // reveal the reels for the roll
+      document.getElementById("mode-intro").classList.remove("leaving");
+    } });
+    base = WORD_HOLD + WORD_FADE;
+  }
   // target roll (same stagger as rollTarget)
-  ev.push({ t: 0, fn: () => { pbSpinReel = [true, true, true]; reels.forEach((r) => r.classList.add("spinning")); } });
-  [650, 1050, 1450].forEach((st, idx) => ev.push({ t: st, fn: () => {
+  ev.push({ t: base + 0, fn: () => { pbSpinReel = [true, true, true]; reels.forEach((r) => r.classList.add("spinning")); } });
+  [650, 1050, 1450].forEach((st, idx) => ev.push({ t: base + st, fn: () => {
     pbSpinReel[idx] = false;
     reels[idx].textContent = pbTargetDigits[idx];
     reels[idx].classList.remove("spinning"); reels[idx].classList.add("lock");
@@ -4283,10 +4318,10 @@ function playIntro(t, nums, draws) {
   // number draws at their recorded times
   let maxEnd = 1450;
   draws.forEach((d) => {
-    ev.push({ t: d.t, fn: () => { pbSpinSlot[d.i] = true; slotParts(d.i).num.classList.add("spinning"); } });
+    ev.push({ t: base + d.t, fn: () => { pbSpinSlot[d.i] = true; slotParts(d.i).num.classList.add("spinning"); } });
     const end = d.t + 420;
     maxEnd = Math.max(maxEnd, end);
-    ev.push({ t: end, fn: () => {
+    ev.push({ t: base + end, fn: () => {
       pbSpinSlot[d.i] = false;
       const num = slotParts(d.i).num;
       num.textContent = pbNums[d.i]; num.classList.remove("spinning"); num.classList.add("filled", "lock");
@@ -4294,18 +4329,18 @@ function playIntro(t, nums, draws) {
     } });
   });
   // reveal the "Beat X" banner as soon as the last number lands
-  ev.push({ t: maxEnd, fn: () => { document.body.classList.add("beat-on"); } });
+  ev.push({ t: base + maxEnd, fn: () => { document.body.classList.add("beat-on"); } });
   // entrance (same beats as beginEntrance, but on the pausable clock)
   const HOLD = 2000, RISE = 800, FADE = 500, beat = maxEnd + 450;
-  ev.push({ t: beat, fn: () => {
+  ev.push({ t: base + beat, fn: () => {
     initPages(); layoutBorder(); resetBorder();
     timerEl.textContent = isTimedGame() ? fmtTime(TIMED_SEC) : "00:00";
     document.body.classList.remove("time-up"); document.body.classList.add("entering");
     positionBeat();
   } });
-  ev.push({ t: beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); trackBeatFor(RISE + 120); } });
-  ev.push({ t: beat + HOLD + RISE, fn: () => { document.body.classList.add("playing"); calcEl.style.maxHeight = "80vh"; positionBeat(); } });
-  ev.push({ t: beat + HOLD + RISE + FADE, fn: () => {
+  ev.push({ t: base + beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); trackBeatFor(RISE + 120); } });
+  ev.push({ t: base + beat + HOLD + RISE, fn: () => { document.body.classList.add("playing"); calcEl.style.maxHeight = "80vh"; positionBeat(); } });
+  ev.push({ t: base + beat + HOLD + RISE + FADE, fn: () => {
     startTimer(); startBorder(0); positionPageDel(); positionBeat();
     replaying = false; document.body.classList.remove("replay");
     saveState();
