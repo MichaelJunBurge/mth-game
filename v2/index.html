@@ -1447,21 +1447,20 @@ function animateIntroWord(text) {
   clearIntroAnim();
   const spans = buildIntroLetters(text);
   const rnd = () => String.fromCharCode(97 + randInt(0, 25)); // lowercase a–z while spinning
-  // Letters begin locking almost as soon as the page lands (small START), then
-  // cascade left-to-right over a longer, more deliberate span (STEP) while cycling
-  // random letters at a slower flicker (SPIN_MS).
-  const START = 150, STEP = 180, SPIN_MS = 80;
+  // The page slide is ~0.22s; keep the letters running ~half a second AFTER it
+  // lands, then stop them left-to-right.
+  const START = 600;
   spans.forEach((s, i) => {
     s.classList.add("spinning");
     s.textContent = rnd();
-    const spin = setInterval(() => { s.textContent = rnd(); }, SPIN_MS);
+    const spin = setInterval(() => { s.textContent = rnd(); }, 45);
     introTimers.push(spin);
     introTimers.push(setTimeout(() => {            // stop + lock this letter (cascades left-to-right)
       clearInterval(spin);
       s.textContent = text[i];
       s.classList.remove("spinning");
       s.classList.add("lock");
-    }, START + i * STEP));
+    }, START + i * 70));
   });
 }
 function introWordText() {
