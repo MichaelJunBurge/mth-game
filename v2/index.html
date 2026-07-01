@@ -248,7 +248,9 @@
     font-size: var(--size-ui);                   /* match the menu text size */
     font-weight: 700;
     letter-spacing: 0.15em;                      /* same as the menu buttons */
-    padding: 1em 1.4em;                          /* comfortable button hit area — press on the word to select */
+    padding: 1.1em 1.6em;                        /* comfortable button hit area — press on the word to select */
+    position: relative;
+    z-index: 70;                                 /* on the top layer so nothing can shadow the press */
     transition: opacity 0.15s ease, transform 0.08s;
   }
   .intro-word:hover { opacity: 0.85; }
@@ -3255,6 +3257,10 @@ function triggerIntroWord() {
   else document.getElementById("mode-intro").classList.add("revealed");
 }
 document.getElementById("intro-word").addEventListener("click", triggerIntroWord);
+// Keep word presses from feeding the stage's swipe tracking, so a tap on the word
+// is always a clean button press — never mis-read as a swipe/navigation.
+["pointerdown", "pointerup", "pointermove"].forEach((ev) =>
+  document.getElementById("intro-word").addEventListener(ev, (e) => e.stopPropagation()));
 document.getElementById("menu-lang").addEventListener("click", toggleLang);
 
 // Drag-to-close on the overlays: the open sheet follows the finger back toward
