@@ -2582,17 +2582,17 @@ stageEl.addEventListener("click", (e) => {
 // a per-gesture AXIS LOCK (accumulated dx/dy picks horizontal page/mode-nav vs
 // vertical sheets). After a swipe fires we lock and ignore its momentum tail (a
 // decaying same-direction stream — a trackpad has no touch-start/end to delimit
-// gestures). Two things re-arm for the NEXT swipe: (1) a firm push back the OTHER
-// way (reversal) — momentum never reverses, so it's unambiguous and makes quick
-// open→close snappy; (2) a >110ms idle gap (the momentum stopped, so fresh input is
-// a new gesture). We deliberately do NOT re-arm on a perpendicular nudge or a
-// magnitude dip-then-rise: a real two-finger swipe wobbles off-axis and stutters in
-// magnitude, so those fired a SECOND time within one gesture (skipping a page, or
-// opening a sheet while closing another). Same-direction repeats without any pause
-// fall back to the idle gap — a natural micro-pause between swipes is enough.
-// No `animating` guard, so swipes work mid-animation (incl. during the intro reveal).
+// gestures). The lock re-arms for the NEXT swipe only on: (1) a firm push back the
+// OTHER way (reversal) — momentum never reverses, so it's unambiguous and keeps
+// open→close snappy; or (2) a genuine same-direction NEW swipe = a quiet gap (>140ms
+// since the last event) AND >=300ms since we last fired. Both are needed: a firm
+// swipe's momentum can briefly gap yet still be strong, so a gap ALONE re-fired it
+// (two pages from one swipe); by 300ms post-fire the momentum is spent and the
+// accumulator (reset on every fire) can't re-cross the 30-unit threshold. No
+// perpendicular/dip re-arm (they false-fired on off-axis wobble / magnitude stutter).
+// No `animating` guard, so swipes work mid-animation (incl. the intro reveal).
 // deltaX/Y = -finger movement.
-let gDX = 0, gDY = 0, gWheelIdle = null, gWheelLock = false, gAxis = "", gSign = 0;
+let gDX = 0, gDY = 0, gWheelLock = false, gAxis = "", gSign = 0, gLastTs = 0, gFiredTs = 0;
 window.addEventListener("wheel", (e) => {
   if (Math.abs(e.deltaX) < 0.5 && Math.abs(e.deltaY) < 0.5) return;
   // Let genuinely-scrollable overlay text scroll instead of hijacking the swipe.
@@ -2602,21 +2602,24 @@ window.addEventListener("wheel", (e) => {
     if (!((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom))) return;
   }
   e.preventDefault();
-  clearTimeout(gWheelIdle);
-  gWheelIdle = setTimeout(() => { gDX = 0; gDY = 0; gWheelLock = false; gAxis = ""; gSign = 0; }, 110);
+  const ts = e.timeStamp, gap = ts - gLastTs;             // time since the previous wheel event
+  gLastTs = ts;
   if (gWheelLock) {                                        // already fired this gesture
     const along = gAxis === "h" ? e.deltaX : e.deltaY;     // movement on the fired axis
-    // Only a firm push back the OTHER way is a new swipe mid-momentum (momentum never
-    // reverses). Everything else waits for the idle gap, so one gesture fires once.
-    if (gSign && Math.sign(along) === -gSign && Math.abs(along) > 10) {
-      gWheelLock = false; gDX = 0; gDY = 0; gAxis = ""; gSign = 0;
-    } else return;                                         // same gesture / its momentum tail
-  }
+    const reversed = gSign && Math.sign(along) === -gSign && Math.abs(along) > 10; // firm push back the other way
+    // A same-direction re-fire is a NEW swipe only after the previous one is truly
+    // over: a real quiet gap AND >=300ms since we last fired. A single firm swipe's
+    // momentum can briefly gap yet still be strong (that re-fired = two pages from one
+    // swipe); by 300ms post-fire it's spent, so the reset accumulator can't re-cross.
+    const newSwipe = gap > 140 && (ts - gFiredTs) > 300;
+    if (reversed || newSwipe) { gWheelLock = false; gDX = 0; gDY = 0; gAxis = ""; gSign = 0; }
+    else return;                                           // same gesture / its momentum tail
+  } else if (gap > 140) { gDX = 0; gDY = 0; }              // drop stale accumulation from an abandoned sub-threshold nudge
   gDX += e.deltaX; gDY += e.deltaY;
   const horiz = Math.abs(gDX) >= Math.abs(gDY);
   if ((horiz ? Math.abs(gDX) : Math.abs(gDY)) < 30) return;
   const dirX = gDX, dirY = gDY;
-  gWheelLock = true; gAxis = horiz ? "h" : "v"; gSign = Math.sign(horiz ? dirX : dirY); gDX = 0; gDY = 0;
+  gWheelLock = true; gAxis = horiz ? "h" : "v"; gSign = Math.sign(horiz ? dirX : dirY); gDX = 0; gDY = 0; gFiredTs = ts;
   const menuOpen = document.body.classList.contains("menu-open");
   const guideOpen = document.body.classList.contains("guide-open");
   if (horiz) {
