@@ -1992,8 +1992,10 @@ function renderDots() {
   for (let i = 0; i < pageCount(); i++) {
     const d = document.createElement("div");
     d.className = "dot" + (i === pageIndex ? " active" : "") + (i === 0 ? " pad" : "");
-    const to = i;
-    d.addEventListener("click", () => gotoPage(to));
+    // The dots sit where the home profile/help (?) icon lives — tap them to open
+    // the profile/help menu mid-game (a click route on desktop + mobile; page nav
+    // is still swipe / tap-a-side).
+    d.addEventListener("click", openGuide);
     dotsEl.appendChild(d);
   }
   // A "+" at the right end while there's room: swipe right / tap it to add a calc.
@@ -2413,7 +2415,14 @@ stageEl.addEventListener("click", (e) => {
     else if (e.clientX > r.right) pageRight();
     else if (document.body.classList.contains("tape-open")) collapseTape(); // centre tap closes the tape
   } else if (canHomeModeSwipe()) {
-    commitModeSwipe(e.clientX > window.innerWidth / 2); // tap right -> right neighbour enters from the right (like the game pages)
+    // On the Ranked/Multiplayer intro, the whole centre band acts on the word
+    // (the word itself is a tiny target); only the side margins navigate.
+    if (document.body.classList.contains("mode-intro-on") &&
+        Math.abs(e.clientX - window.innerWidth / 2) < window.innerWidth * 0.25) {
+      triggerIntroWord();
+    } else {
+      commitModeSwipe(e.clientX > window.innerWidth / 2); // tap right -> right neighbour enters from the right (like the game pages)
+    }
   }
 });
 stageEl.addEventListener("pointermove", (e) => {
@@ -3233,13 +3242,13 @@ function restartShared() {
 timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-help").addEventListener("click", openGuide);
-// Mode intro word (it's a button, so tapping it doesn't flip the carousel the way
-// the surrounding area does): Ranked fades away to reveal the game; Multiplayer
-// reveals "Coming soon".
-document.getElementById("intro-word").addEventListener("click", () => {
+// Mode intro word action: Ranked fades away to reveal the game; Multiplayer
+// reveals "Coming soon". Fired by tapping the word OR the centre band around it.
+function triggerIntroWord() {
   if (gameMode === "ranked") revealRanked();
   else document.getElementById("mode-intro").classList.add("revealed");
-});
+}
+document.getElementById("intro-word").addEventListener("click", triggerIntroWord);
 document.getElementById("menu-lang").addEventListener("click", toggleLang);
 
 // Drag-to-close on the overlays: the open sheet follows the finger back toward
