@@ -963,7 +963,7 @@
   .beat-dot { display: none; }
   body.has-beat #nav-help .beat-dot { display: block; position: absolute; top: 0.1em; right: 0.1em; width: 0.42em; height: 0.42em; border-radius: 50%; background: var(--red); }
   body.has-beat #account-games::after { content: " ●"; color: var(--red); font-size: 0.7em; vertical-align: middle; }
-  body.has-group-invite #account-groups::after { content: " ●"; color: var(--red); font-size: 0.7em; vertical-align: middle; }
+  body.has-group-invite #account-friends::after { content: " ●"; color: var(--red); font-size: 0.7em; vertical-align: middle; }
   /* Groups + group leaderboards. */
   .group-title { font-size: calc(var(--size-ui) * 1.15); font-weight: 700; color: var(--ink); text-align: center; }
   .lb { display: flex; flex-direction: column; gap: 0.1em; padding: 0.2em 0 0.5em 0.6em; }
@@ -1253,11 +1253,8 @@
     <div class="menu-view guide-account-view">
       <button id="account-username" class="menu-btn account-username"></button>
       <button id="account-games" class="menu-btn" data-i18n="games.title">active games</button>
-      <button id="account-groups" class="menu-btn" data-i18n="groups.title">groups</button>
-      <button id="account-leaderboard" class="menu-btn" data-i18n="lb.title">leaderboard</button>
-      <button id="account-h2h" class="menu-btn" data-i18n="h2h.title">head to head</button>
-      <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
       <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
+      <button id="account-leaderboard" class="menu-btn" data-i18n="lb.title">leaderboard</button>
       <button id="account-help" class="menu-btn guide-qmark" aria-label="help">?</button>
     </div>
     <!-- Account settings (opened by tapping the username). -->
@@ -1286,13 +1283,6 @@
       <div id="games-body" class="games-body"></div>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
-    <!-- Groups: my groups + create a new one. -->
-    <div class="menu-view guide-groups-view">
-      <div id="groups-body" class="games-body"></div>
-      <input id="group-new-name" class="auth-input" data-i18n-ph="groups.newName" placeholder="new group name" maxlength="40" />
-      <button id="group-create" class="menu-btn" data-i18n="groups.create">create group</button>
-      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
-    </div>
     <!-- One group: members, add member, board (leaderboards), post a game, leave. -->
     <div class="menu-view guide-groupdetail-view">
       <div id="group-detail-title" class="group-title"></div>
@@ -1312,10 +1302,13 @@
       <div id="stats-body" class="stats-body"></div>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
-    <!-- Friends: search + requests + friends list. -->
+    <!-- Friends + groups (one section). -->
     <div class="menu-view guide-friends-view">
       <input id="friend-search" class="auth-input" type="text" autocomplete="off" data-i18n-ph="friends.find" placeholder="find players" />
       <div id="friends-body" class="friends-body"></div>
+      <div id="groups-body" class="games-body"></div>
+      <input id="group-new-name" class="auth-input" data-i18n-ph="groups.newName" placeholder="new group name" maxlength="40" />
+      <button id="group-create" class="menu-btn" data-i18n="groups.create">create group</button>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <div class="menu-view guide-rules-view">
@@ -3828,8 +3821,7 @@ document.getElementById("set-delete").addEventListener("click", async () => {
   if (r.ok) { applyAuthState(null, null); closeGuide(); showToast(t("set.deleteDone")); }
 });
 
-// ---- Ranked stats view ----
-document.getElementById("account-stats").addEventListener("click", openStats);
+// ---- Ranked stats (now shown inside the leaderboard view via statsHtml) ----
 async function openStats() {
   setGuideView("stats");
   const body = document.getElementById("stats-body");
@@ -3837,9 +3829,9 @@ async function openStats() {
   try { renderStats(await (await import("./src/services/stats.js")).getStats()); }
   catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
 }
-function renderStats(st) {
-  const body = document.getElementById("stats-body");
-  if (!st) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; return; }
+function renderStats(st) { document.getElementById("stats-body").innerHTML = statsHtml(st); }
+function statsHtml(st) {
+  if (!st) return '<div class="stat-line">' + t("auth.offline") + '</div>';
   const rows = st.ranked, n = rows.length;
   let html = '<div class="stats-nums">'
     + '<div class="stat-num"><b>' + st.totalPlayed + '</b><span>' + t("stats.games") + '</span></div>'
@@ -3847,7 +3839,7 @@ function renderStats(st) {
   const exact = rows.filter((r) => r.solved || r.distance === 0).length;
   if (n) html += '<div class="stat-num"><b>' + Math.round((exact / n) * 100) + '%</b><span>' + t("stats.exact") + '</span></div>';
   html += '</div>';
-  if (!n) { html += '<div class="stat-line">' + t("stats.empty") + '</div>'; body.innerHTML = html; return; }
+  if (!n) return html + '<div class="stat-line">' + t("stats.empty") + '</div>';
   // Distance distribution in tens (exact / 1–10 / 11–20 / … / 50+).
   const labels = [t("stats.bucketExact"), "1–10", "11–20", "21–30", "31–40", "41–50", "50+"];
   const counts = new Array(7).fill(0);
@@ -3874,7 +3866,7 @@ function renderStats(st) {
     const arrow = rD < eD - 0.5 ? " ▾" : rD > eD + 0.5 ? " ▴" : "";
     html += '<div class="stat-line">' + t("stats.recent", { k, d: Math.round(rD) }) + arrow + '</div>';
   }
-  body.innerHTML = html;
+  return html;
 }
 
 // ---- Friends view ----
@@ -3885,6 +3877,7 @@ async function openFriends() {
   setGuideView("friends");
   document.getElementById("friend-search").value = "";
   await renderFriends(null);
+  renderGroupsList(); // groups now live in the friends section
 }
 const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function friendRow(name, actsHtml) {
@@ -4016,9 +4009,8 @@ async function checkBeatBadge() {
 // ---- Groups ----
 let groupsMod = null, currentGroupId = null, currentGroupName = "", groupSearchTimer = null;
 async function groupsApi() { if (!groupsMod) groupsMod = await import("./src/services/groups.js"); return groupsMod; }
-document.getElementById("account-groups").addEventListener("click", openGroups);
-async function openGroups() {
-  setGuideView("groups");
+// Renders the groups list (invites + groups) into #groups-body inside the friends view.
+async function renderGroupsList() {
   const body = document.getElementById("groups-body");
   body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
   try {
@@ -4046,7 +4038,7 @@ document.getElementById("groups-body").addEventListener("click", async (e) => {
     const btn = acc || dec;
     btn.disabled = true;
     try { await (await groupsApi()).respondInvite(btn.dataset.acceptinv || btn.dataset.declineinv, !!acc); } catch (err) {}
-    openGroups(); checkGroupInvites();
+    renderGroupsList(); checkGroupInvites();
     return;
   }
   const row = e.target.closest("[data-group]");
@@ -4081,7 +4073,7 @@ document.getElementById("group-create").addEventListener("click", async () => {
   const el = document.getElementById("group-new-name"), name = el.value.trim();
   if (!name) return;
   el.value = "";
-  try { if (await (await groupsApi()).createGroup(name)) openGroups(); } catch (e) {}
+  try { if (await (await groupsApi()).createGroup(name)) renderGroupsList(); } catch (e) {}
 });
 async function openGroupDetail(gid, name) {
   currentGroupId = gid; currentGroupName = name || "";
@@ -4161,7 +4153,7 @@ document.getElementById("group-detail-body").addEventListener("click", async (e)
   const play = e.target.closest("[data-play]");
   if (play) { closeGuide(); loadChallenge(play.dataset.play, false); return; } // play a group game (no gate)
   if (add) { add.disabled = true; try { const api = await groupsApi(); const r = await api.inviteMember(currentGroupId, add.dataset.addmember); if (!r.ok) await api.addMember(currentGroupId, add.dataset.addmember); /* pre-SQL fallback: direct add */ document.getElementById("group-add-search").value = ""; renderGroupDetail(null); } catch (err) {} }
-  else if (leave) { try { await (await groupsApi()).leaveGroup(currentGroupId); openGroups(); } catch (err) {} }
+  else if (leave) { try { await (await groupsApi()).leaveGroup(currentGroupId); openFriends(); } catch (err) {} }
 });
 document.getElementById("group-post").addEventListener("click", async () => {
   const btn = document.getElementById("group-post");
@@ -4175,14 +4167,11 @@ document.getElementById("group-post").addEventListener("click", async () => {
   } catch (e) { /* offline */ }
   btn.disabled = false;
 });
-document.getElementById("group-back").addEventListener("click", openGroups);
+document.getElementById("group-back").addEventListener("click", openFriends);
 
 // ---- Head-to-head records (computed from challenge data; no extra table) ----
-document.getElementById("account-h2h").addEventListener("click", openH2H);
-async function openH2H() {
-  setGuideView("h2h");
-  const body = document.getElementById("h2h-body");
-  body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
+// Head-to-head records (merged into the leaderboard view). Returns HTML.
+async function h2hSectionHtml() {
   try {
     const c = await import("./src/services/challenges.js");
     const [sent, played] = await Promise.all([c.listSent(), c.listPlayed()]);
@@ -4194,35 +4183,35 @@ async function openH2H() {
       const v = verdict(mine, theirs);
       if (v === "win") e.wins++; else if (v === "lose") e.losses++;
     };
-    // My challenges: I'm the benchmark (payload.o), each attempter is an opponent.
     sent.forEach((ch) => { const mine = gOut(ch.payload.o); (ch.attempts || []).forEach((a) => tally(a.username, mine, gOut(a))); });
-    // Challenges I played: my attempt vs the creator's benchmark.
     played.forEach((p) => tally(p.challenge.creator_username, gOut(p.attempt), gOut(p.challenge.payload.o)));
     const rows = [...map.values()].sort((a, b) => b.games - a.games || b.wins - a.wins);
-    if (!rows.length) { body.innerHTML = '<div class="stat-line">' + t("h2h.empty") + '</div>'; return; }
+    if (!rows.length) return '<div class="stat-line">' + t("h2h.empty") + '</div>';
     let html = '<div class="lb">';
-    rows.forEach((r) => {
-      html += '<div class="lb-row"><span class="who">' + escHtml(r.username) + '</span><span class="res">' + t("h2h.record", { w: r.wins, l: r.losses, n: r.games }) + '</span></div>';
-    });
-    body.innerHTML = html + '</div>';
-  } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+    rows.forEach((r) => { html += '<div class="lb-row"><span class="who">' + escHtml(r.username) + '</span><span class="res">' + t("h2h.record", { w: r.wins, l: r.losses, n: r.games }) + '</span></div>'; });
+    return html + '</div>';
+  } catch (e) { return '<div class="stat-line">' + t("auth.offline") + '</div>'; }
 }
 
 // ---- Global ranked leaderboard ----
 document.getElementById("account-leaderboard").addEventListener("click", openLeaderboard);
+// Leaderboard view now also carries your stats + head-to-head (merged sections).
 async function openLeaderboard() {
   setGuideView("leaderboard");
   const body = document.getElementById("leaderboard-body");
   body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
   try {
-    const { rows, me } = await (await import("./src/services/stats.js")).getLeaderboard();
-    if (!rows.length) { body.innerHTML = '<div class="stat-line">' + t("lb.empty") + '</div>'; return; }
-    let html = '<div class="games-label">' + t("lb.title") + '</div><div class="lb">';
-    rows.forEach((r) => {
-      const isMe = r.user_id === me;
-      html += '<div class="lb-row' + (isMe ? " me" : "") + '"><span class="rank">' + r.rnk + '</span><span class="who">' + escHtml(r.username || "?") + '</span><span class="res">' + t("lb.pts", { p: r.points }) + '</span></div>';
-    });
-    html += '</div>';
+    const sMod = await import("./src/services/stats.js");
+    const [lb, st] = await Promise.all([sMod.getLeaderboard(), sMod.getStats()]);
+    let html = '<div class="games-label">' + t("lb.title") + '</div>';
+    if (!lb.rows.length) html += '<div class="stat-line">' + t("lb.empty") + '</div>';
+    else {
+      html += '<div class="lb">';
+      lb.rows.forEach((r) => { const isMe = r.user_id === lb.me; html += '<div class="lb-row' + (isMe ? " me" : "") + '"><span class="rank">' + r.rnk + '</span><span class="who">' + escHtml(r.username || "?") + '</span><span class="res">' + t("lb.pts", { p: r.points }) + '</span></div>'; });
+      html += '</div>';
+    }
+    html += '<div class="games-label">' + t("stats.title") + '</div>' + statsHtml(st);
+    html += '<div class="games-label">' + t("h2h.title") + '</div>' + (await h2hSectionHtml());
     body.innerHTML = html;
   } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
 }
