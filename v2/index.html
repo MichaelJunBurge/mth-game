@@ -2846,7 +2846,6 @@ function backToHome() {
   resetCalc();
   stopTimer();
   resetSlots();
-  rankedRevealed = false; practiceRevealed = false; // returning home re-shows the page's intro word
   currentTarget = null; // pristine home: target back to 000 (also re-enables mode-swipe)
   reels.forEach((r) => { r.textContent = "0"; r.className = "reel"; });
   history = [];
