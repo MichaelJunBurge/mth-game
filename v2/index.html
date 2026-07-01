@@ -1388,9 +1388,15 @@ function homeIsPractice() { return gameMode === "practice" && !sharedGame; }
 // behave the same. Ranked and Practice drop their intro once tapped (revealing the
 // game beneath); Multiplayer keeps it (its word toggles "coming soon").
 function introActive() {
-  return gameMode === "multiplayer" ||
-         (gameMode === "ranked" && !rankedRevealed) ||
-         (gameMode === "practice" && !practiceRevealed);
+  if (gameMode === "multiplayer") return true;      // no game to start — always the "coming soon" word
+  // The intro word only belongs on a PRISTINE page. Once a target is rolled or a
+  // number is drawn (incl. a game restored from a save), we're past the intro — so
+  // the word must never cover an in-progress game (that stranded the page: hidden
+  // target + no swipe because canHomeModeSwipe is false).
+  if (currentTarget !== null || countFilled() > 0) return false;
+  if (gameMode === "ranked") return !rankedRevealed;
+  if (gameMode === "practice") return !practiceRevealed;
+  return false;
 }
 // Show the time budget at the top on home: 2:00 once a ranked game is revealed,
 // the sender's time-to-beat for a shared game; nothing otherwise. Also drive the
@@ -3146,6 +3152,9 @@ function restoreState(raw) {
     }
     slotUsed[i] = false;
   }
+  // A restored game has a target/numbers, so it's past the intro — clear any intro
+  // word the boot-time refreshHomeTimer() put up while currentTarget was still null.
+  refreshHomeTimer();
 
   if (s.largeBag) largeBag = s.largeBag;
   if (s.smallBag) smallBag = s.smallBag;
