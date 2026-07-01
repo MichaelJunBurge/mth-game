@@ -248,13 +248,13 @@
     font-size: var(--size-ui);                   /* match the menu text size */
     font-weight: 700;
     letter-spacing: 0.15em;                      /* same as the menu buttons */
-    padding: 1.1em 1.6em;                        /* comfortable button hit area — press on the word to select */
+    padding: 1.3em 1.9em;                        /* generous, clear tap target */
     position: relative;
     z-index: 70;                                 /* on the top layer so nothing can shadow the press */
-    transition: opacity 0.15s ease, transform 0.08s;
+    transition: transform 0.12s ease;
   }
-  .intro-word:hover { opacity: 0.85; }
-  .intro-word:active { transform: scale(0.96); }
+  .intro-word:hover { transform: scale(1.14); }  /* enlarge like the menu buttons — makes it read as a button */
+  .intro-word:active { transform: scale(0.97); }
   /* Each letter flickers random letters then locks left-to-right, like the target
      reels. Roboto Mono is monospace, so the word width stays put while it spins.
      Kept inline (not inline-block) and with no transform so the letters don't jump
@@ -269,9 +269,10 @@
     transition: opacity 0.25s ease;
   }
   .mode-intro.revealed .intro-soon { opacity: 0.7; }   /* Multiplayer only */
-  /* The game fades in when the Ranked intro is dismissed. */
+  /* The game fades in gently when the Ranked intro is dismissed — slow enough to
+     read as "this was behind the word", not a redirect. */
   @keyframes reveal-in { from { opacity: 0; } to { opacity: 1; } }
-  .content.reveal-in { animation: reveal-in 0.35s ease; }
+  .content.reveal-in { animation: reveal-in 0.6s ease; }
 
   /* ---- Pages: sketchpad + calculators carousel ---- */
   /* Sketchpad: full-screen drawing surface with a faint grid. Shown only while
@@ -433,10 +434,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    /* Keep content clear of the notch / home indicator (0 on desktop). */
+    /* Keep content clear of the notch / home indicator (0 on desktop). Extra
+       bottom padding lifts the centred column up a touch so the keypad-heavy game
+       reads as optically centred rather than sitting low. */
     padding: calc(24px + env(safe-area-inset-top, 0px))
              calc(24px + env(safe-area-inset-right, 0px))
-             calc(24px + env(safe-area-inset-bottom, 0px))
+             calc(24px + 6dvh + env(safe-area-inset-bottom, 0px))
              calc(24px + env(safe-area-inset-left, 0px));
   }
   /* One centered column whose width is the shared --app-w. Spacing is on the
@@ -722,10 +725,18 @@
     font-size: var(--size-ui);
     font-weight: 700;
     color: var(--muted);
-    margin-bottom: 0.4em;
     letter-spacing: 0.15em;
     text-transform: uppercase;
+    background: none;
+    border: none;
+    font-family: var(--font);
+    cursor: pointer;
   }
+  .their-title::after { content: " ▾"; font-size: 0.8em; }   /* tap to expand their working */
+  .win-their.open .their-title::after { content: " ▴"; }
+  /* Their working stays collapsed by default so the finish screen isn't crowded. */
+  .their-working { display: none; flex-direction: column; align-items: center; gap: 0.5em; margin-top: 0.5em; }
+  .win-their.open .their-working { display: flex; }
   .their-line {
     font-size: var(--size-ui);
     font-weight: 400;
@@ -911,8 +922,9 @@
   .attempt-row .who { color: var(--ink); }
   .attempt-row .res { color: var(--muted); }
   .attempt-row .res.beat { color: var(--red); font-weight: 700; }
-  /* Unseen "someone beat you" dot on the profile glyph + account button. */
-  #nav-help { position: relative; }
+  /* Unseen "someone beat you" dot on the profile glyph + account button. (#nav-help
+     is already position:fixed, which is the containing block for the absolute dot —
+     do NOT set position:relative here or it breaks the icon's bottom anchoring.) */
   .beat-dot { display: none; }
   body.has-beat #nav-help .beat-dot { display: block; position: absolute; top: 0.1em; right: 0.1em; width: 0.42em; height: 0.42em; border-radius: 50%; background: var(--red); }
   body.has-beat #account-games::after { content: " ●"; color: var(--red); font-size: 0.7em; vertical-align: middle; }
@@ -1388,7 +1400,7 @@ function revealRanked() {
     rankedRevealed = true;
     refreshHomeTimer();                       // drops the intro, shows target + 02:00
     contentEl.classList.add("reveal-in");
-    setTimeout(() => contentEl.classList.remove("reveal-in"), 400);
+    setTimeout(() => contentEl.classList.remove("reveal-in"), 650);
   };
   intro.addEventListener("transitionend", once);
   setTimeout(once, 360);                       // fallback if transitionend doesn't fire
@@ -1961,12 +1973,15 @@ function handleEquals() {
 }
 
 function evaluate() {
+  // Two operators in a row (e.g. "5xx6") is a slip, not exponentiation — roll it
+  // back to the first number + operator instead of computing something silly.
+  if (/[x+÷^√-]{2}/.test(expr)) return invalidError();
   // Pure numeric evaluation in core/evaluate.js; this keeps the DOM/state side
   // effects. `closed` reflects any auto-closed brackets — sync the display to it.
   const r = evalExpression(expr);
   if (r.status === "empty") return;
   if (r.closed != null && r.closed !== expr) { expr = r.closed; renderDisplay(); }
-  if (r.status === "invalid") return showError();
+  if (r.status === "invalid") return invalidError();
   if (r.status === "fraction") return decimalError(); // no fractions (= and auto-= alike)
 
   const rounded = r.value;
@@ -2023,6 +2038,21 @@ function decimalError() {
   refreshSlots();
   renderGenerated();
   showError();                // flash "Error", then reveal the restored line
+  saveState();
+  clearTimeout(errorFlashTimer);
+  errorFlashTimer = setTimeout(() => { if (displayEl.classList.contains("error")) renderDisplay(); }, 900);
+}
+
+// An invalid expression (e.g. two operators in a row, "5xx6"): flash "Error" and
+// roll the line back to a valid in-progress state — the first number + the first
+// operator ("5x") — freeing the extra number, then auto-clear the flash.
+function invalidError() {
+  if (lastPlayed && lastPlayed.tentative) lastPlayed.tentative = false; // free the last number
+  expr = expr.replace(/\d+(?:\.\d+)?$/, "");            // strip the trailing number
+  expr = expr.replace(/([^0-9.]{2,})$/, (m) => m[0]);   // collapse a run of trailing operators to the first
+  refreshSlots();
+  renderGenerated();
+  showError();
   saveState();
   clearTimeout(errorFlashTimer);
   errorFlashTimer = setTimeout(() => { if (displayEl.classList.contains("error")) renderDisplay(); }, 900);
@@ -2826,19 +2856,24 @@ function endGame() {
       ? t("win.bangOn", { g: goalOf(me) })
       : t("win.score", { s: me.score, d: me.distance, g: goalOf(me) });
 
-    // Reveal the opponent's working and result.
-    const title = document.createElement("div");
+    // Their result (always shown) + their working (collapsed; tap the title to expand).
+    winTheirEl.classList.remove("open");
+    const title = document.createElement("button");
     title.className = "their-title";
     title.textContent = (them.solved || them.distance === 0)
       ? t("win.theyScored", { x: fmtResult(them) })
       : t("win.theyAway", { x: fmtResult(them), d: them.distance });
+    title.addEventListener("click", () => winTheirEl.classList.toggle("open"));
     winTheirEl.appendChild(title);
+    const work = document.createElement("div");
+    work.className = "their-working";
     (them.working || []).forEach((line) => {
       const d = document.createElement("div");
       d.className = "their-line";
       d.textContent = line;
-      winTheirEl.appendChild(d);
+      work.appendChild(d);
     });
+    winTheirEl.appendChild(work);
     winTheirEl.classList.add("show");
   } else {
     celebrate = me.solved || me.distance <= 10; // your own game: solved, or within 10 of the goal
@@ -3363,7 +3398,7 @@ document.getElementById("nav-help").addEventListener("click", openGuide);
 // reveals "Coming soon". Fired by tapping the word OR the centre band around it.
 function triggerIntroWord() {
   if (gameMode === "ranked") revealRanked();
-  else document.getElementById("mode-intro").classList.add("revealed");
+  else document.getElementById("mode-intro").classList.toggle("revealed"); // multiplayer: tap toggles "coming soon"
 }
 document.getElementById("intro-word").addEventListener("click", triggerIntroWord);
 // Keep word presses from feeding the stage's swipe tracking, so a tap on the word
