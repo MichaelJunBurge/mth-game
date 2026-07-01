@@ -887,9 +887,19 @@
   #guide[data-view="username"] .guide-username-view,
   #guide[data-view="account"] .guide-account-view,
   #guide[data-view="stats"] .guide-stats-view,
+  #guide[data-view="friends"] .guide-friends-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  /* Friends: search + relationship rows. */
+  .friends-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(80vw, 330px); max-height: 54vh; overflow-y: auto; }
+  .friends-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
+  .friend-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; padding: 0.35em 0; }
+  .friend-row .uname { font-size: calc(var(--size-ui) * 0.95); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .friend-acts { display: flex; align-items: center; gap: 0.6em; flex-shrink: 0; }
+  .friend-act { background: none; border: none; font-family: var(--font); font-size: calc(var(--size-ui) * 0.8); font-weight: 700; color: var(--ink); cursor: pointer; padding: 0.15em 0.2em; }
+  .friend-act.danger { color: var(--red); }
+  .friend-tag { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); }
   /* Ranked stats panel. */
   .stats-body { display: flex; flex-direction: column; gap: 1.6vh; width: min(80vw, 330px); max-height: 66vh; overflow-y: auto; }
   .stats-nums { display: flex; justify-content: space-around; gap: 3vw; }
@@ -1144,16 +1154,23 @@
       <button id="username-save" class="menu-btn" data-i18n="auth.save">save</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
     </div>
-    <!-- Signed-in account (friends/challenges come later). -->
+    <!-- Signed-in account (challenges come later). -->
     <div class="menu-view guide-account-view">
       <div class="help-text" id="account-msg"></div>
       <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
+      <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <!-- Ranked stats, rendered from game_results. -->
     <div class="menu-view guide-stats-view">
       <div id="stats-body" class="stats-body"></div>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- Friends: search + requests + friends list. -->
+    <div class="menu-view guide-friends-view">
+      <input id="friend-search" class="auth-input" type="text" autocomplete="off" data-i18n-ph="friends.find" placeholder="find players" />
+      <div id="friends-body" class="friends-body"></div>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <div class="menu-view guide-rules-view">
@@ -3064,6 +3081,7 @@ const SIGN_LABEL = { "x": "×", "+": "+", "-": "−", "÷": "÷", "^": "^" };
 function applyLang() {
   document.documentElement.lang = getLang();
   document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.getAttribute("data-i18n")); });
+  document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.getAttribute("data-i18n-ph")); });
   applyTheme(document.body.classList.contains("dark") ? "dark" : "light");
   applyAutoEqual(autoEqual);
   applyAutoSign(autoSign);
@@ -3437,6 +3455,85 @@ function renderStats(st) {
   }
   body.innerHTML = html;
 }
+
+// ---- Friends view ----
+let friendsMod = null, friendSearchTimer = null;
+async function friendsApi() { if (!friendsMod) friendsMod = await import("./src/services/friends.js"); return friendsMod; }
+document.getElementById("account-friends").addEventListener("click", openFriends);
+async function openFriends() {
+  setGuideView("friends");
+  document.getElementById("friend-search").value = "";
+  await renderFriends(null);
+}
+const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function friendRow(name, actsHtml) {
+  return '<div class="friend-row"><div class="uname">' + escHtml(name) + '</div><div class="friend-acts">' + actsHtml + '</div></div>';
+}
+async function renderFriends(results) {
+  const body = document.getElementById("friends-body");
+  body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
+  let rels;
+  try { rels = await (await friendsApi()).listFriendships(); }
+  catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; return; }
+  const byId = new Map(rels.map((r) => [r.other_id, r]));
+  let html = "";
+  // Search results (with the right action per existing relationship).
+  if (results && results.length) {
+    html += '<div class="friends-label">' + t("friends.results") + '</div>';
+    results.forEach((u) => {
+      const rel = byId.get(u.id);
+      let act;
+      if (!rel) act = '<button class="friend-act" data-add="' + u.id + '">' + t("friends.add") + '</button>';
+      else if (rel.status === "accepted") act = '<span class="friend-tag">' + t("friends.friend") + '</span>';
+      else if (rel.direction === "incoming") act = '<button class="friend-act" data-accept="' + rel.friendship_id + '">' + t("friends.accept") + '</button>';
+      else act = '<span class="friend-tag">' + t("friends.sent") + '</span>';
+      html += friendRow(u.username, act);
+    });
+  }
+  const incoming = rels.filter((r) => r.status === "pending" && r.direction === "incoming");
+  const friends = rels.filter((r) => r.status === "accepted");
+  const outgoing = rels.filter((r) => r.status === "pending" && r.direction === "outgoing");
+  if (incoming.length) {
+    html += '<div class="friends-label">' + t("friends.requests") + '</div>';
+    incoming.forEach((r) => html += friendRow(r.username,
+      '<button class="friend-act" data-accept="' + r.friendship_id + '">' + t("friends.accept") + '</button>'
+      + '<button class="friend-act danger" data-remove="' + r.friendship_id + '">' + t("friends.decline") + '</button>'));
+  }
+  html += '<div class="friends-label">' + t("friends.yours") + '</div>';
+  if (!friends.length) html += '<div class="stat-line">' + t("friends.none") + '</div>';
+  friends.forEach((r) => html += friendRow(r.username,
+    '<button class="friend-act danger" data-remove="' + r.friendship_id + '">' + t("friends.remove") + '</button>'));
+  if (outgoing.length) {
+    html += '<div class="friends-label">' + t("friends.pending") + '</div>';
+    outgoing.forEach((r) => html += friendRow(r.username,
+      '<span class="friend-tag">' + t("friends.sent") + '</span>'
+      + '<button class="friend-act danger" data-remove="' + r.friendship_id + '">' + t("friends.cancel") + '</button>'));
+  }
+  body.innerHTML = html;
+}
+// Debounced search-as-you-type.
+document.getElementById("friend-search").addEventListener("input", (e) => {
+  const q = e.target.value;
+  clearTimeout(friendSearchTimer);
+  friendSearchTimer = setTimeout(async () => {
+    if (!q.trim()) { renderFriends(null); return; }
+    try { renderFriends(await (await friendsApi()).searchUsers(q)); } catch (err) {}
+  }, 280);
+});
+// Actions (event delegation): add / accept / remove-decline-cancel, then re-render.
+document.getElementById("friends-body").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-add], [data-accept], [data-remove]");
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const api = await friendsApi();
+    if (btn.dataset.add) await api.sendRequest(btn.dataset.add);
+    else if (btn.dataset.accept) await api.acceptRequest(Number(btn.dataset.accept));
+    else if (btn.dataset.remove) await api.removeFriendship(Number(btn.dataset.remove));
+    const q = document.getElementById("friend-search").value;
+    renderFriends(q.trim() ? await api.searchUsers(q) : null);
+  } catch (err) { btn.disabled = false; }
+});
 applyAuthState(null, null); // default: signed out
 (async () => {           // restore the session on load + track changes
   try {
