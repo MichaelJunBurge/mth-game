@@ -889,9 +889,11 @@
   #guide[data-view="stats"] .guide-stats-view,
   #guide[data-view="friends"] .guide-friends-view,
   #guide[data-view="games"] .guide-games-view,
+  #guide[data-view="groups"] .guide-groups-view,
+  #guide[data-view="groupdetail"] .guide-groupdetail-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
   /* Active games list. */
   .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
   .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
@@ -912,6 +914,14 @@
   .beat-dot { display: none; }
   body.has-beat #nav-help .beat-dot { display: block; position: absolute; top: 0.1em; right: 0.1em; width: 0.42em; height: 0.42em; border-radius: 50%; background: var(--red); }
   body.has-beat #account-games::after { content: " ●"; color: var(--red); font-size: 0.7em; vertical-align: middle; }
+  /* Groups + group leaderboards. */
+  .group-title { font-size: calc(var(--size-ui) * 1.15); font-weight: 700; color: var(--ink); text-align: center; }
+  .lb { display: flex; flex-direction: column; gap: 0.1em; padding: 0.2em 0 0.5em 0.6em; }
+  .lb-row { display: flex; gap: 0.5em; font-size: calc(var(--size-ui) * 0.78); }
+  .lb-row.me { font-weight: 700; }
+  .lb-row .rank { color: var(--muted); width: 1.5em; flex-shrink: 0; }
+  .lb-row .who { flex: 1; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-row .res { color: var(--muted); flex-shrink: 0; }
   /* Friends: search + relationship rows. */
   .friends-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(80vw, 330px); max-height: 54vh; overflow-y: auto; }
   .friends-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
@@ -1180,6 +1190,7 @@
     <div class="menu-view guide-account-view">
       <div class="help-text" id="account-msg"></div>
       <button id="account-games" class="menu-btn" data-i18n="games.title">active games</button>
+      <button id="account-groups" class="menu-btn" data-i18n="groups.title">groups</button>
       <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
       <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
@@ -1189,6 +1200,21 @@
     <div class="menu-view guide-games-view">
       <div id="games-body" class="games-body"></div>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- Groups: my groups + create a new one. -->
+    <div class="menu-view guide-groups-view">
+      <div id="groups-body" class="games-body"></div>
+      <input id="group-new-name" class="auth-input" data-i18n-ph="groups.newName" placeholder="new group name" maxlength="40" />
+      <button id="group-create" class="menu-btn" data-i18n="groups.create">create group</button>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- One group: members, add member, board (leaderboards), post a game, leave. -->
+    <div class="menu-view guide-groupdetail-view">
+      <div id="group-detail-title" class="group-title"></div>
+      <input id="group-add-search" class="auth-input" data-i18n-ph="groups.addMember" autocomplete="off" placeholder="add a member" />
+      <div id="group-detail-body" class="games-body"></div>
+      <button id="group-post" class="menu-btn" data-i18n="groups.postGame">share your last game</button>
+      <button id="group-back" class="menu-btn guide-back-inner" data-i18n="menu.back">Back</button>
     </div>
     <!-- Ranked stats, rendered from game_results. -->
     <div class="menu-view guide-stats-view">
@@ -3074,15 +3100,17 @@ function showToast(msg) {
 
 // (encodeGame / decodeGame / parseShareParams live in services/share.js)
 
-async function sharePuzzle() {
-  if (currentTarget === null || !lastOutcome) return;
-  const payload = {
+// The shareable payload for the just-finished game (null if none). Shared by the
+// share button and by posting a game to a group.
+function buildSharePayload() {
+  if (currentTarget === null || !lastOutcome) return null;
+  return {
     t: currentTarget,
     n: slotValues.slice(),
-    s: Math.max(1, Math.round(lastOutcome.timeSec)), // opponent's bar duration
-    pr: (sharedGame ? sharedGame.practice : practiceGame) ? 1 : 0, // my mode (practice = growing ring)
-    w: history.slice(),                               // my working
-    intro: introDraws.slice(),                        // intro replay (roll + draws)
+    s: Math.max(1, Math.round(lastOutcome.timeSec)),
+    pr: (sharedGame ? sharedGame.practice : practiceGame) ? 1 : 0,
+    w: history.slice(),
+    intro: introDraws.slice(),
     o: {
       solved: lastOutcome.solved,
       timeSec: Math.round(lastOutcome.timeSec * 10) / 10,
@@ -3091,12 +3119,17 @@ async function sharePuzzle() {
       distance: lastOutcome.distance,
     },
   };
+}
+let lastCreatedChallengeId = null; // the last challenge this player created via share (for posting to a group)
+async function sharePuzzle() {
+  const payload = buildSharePayload();
+  if (!payload) return;
   const url = new URL(location.href);
   let link, tracked = false;
   if (authSession) { // signed in -> a tracked challenge (?c=<id>) so attempts show up
     try {
       const id = await (await import("./src/services/challenges.js")).createChallenge(payload);
-      if (id) { url.search = "?c=" + id; link = url.toString(); tracked = true; }
+      if (id) { lastCreatedChallengeId = id; url.search = "?c=" + id; link = url.toString(); tracked = true; }
     } catch (e) { /* offline -> fall back to an encoded link */ }
   }
   if (!link) { url.search = "?g=" + encodeGame(payload); link = url.toString(); }
@@ -3636,6 +3669,104 @@ async function checkBeatBadge() {
     document.body.classList.toggle("has-beat", beaten);
   } catch (e) { /* offline */ }
 }
+// ---- Groups ----
+let groupsMod = null, currentGroupId = null, currentGroupName = "", groupSearchTimer = null;
+async function groupsApi() { if (!groupsMod) groupsMod = await import("./src/services/groups.js"); return groupsMod; }
+document.getElementById("account-groups").addEventListener("click", openGroups);
+async function openGroups() {
+  setGuideView("groups");
+  const body = document.getElementById("groups-body");
+  body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
+  try {
+    const groups = await (await groupsApi()).listGroups();
+    let html = groups.length ? "" : '<div class="stat-line">' + t("groups.none") + '</div>';
+    groups.forEach((g) => {
+      html += '<div class="game-row" data-group="' + g.id + '" data-name="' + escHtml(g.name) + '"><div class="game-main"><div class="game-title">' + escHtml(g.name) + '</div><div class="game-sub">' + t("groups.membersN", { n: g.members }) + '</div></div><div class="game-right">›</div></div>';
+    });
+    body.innerHTML = html;
+  } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+}
+document.getElementById("groups-body").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-group]");
+  if (row) openGroupDetail(row.dataset.group, row.dataset.name);
+});
+document.getElementById("group-create").addEventListener("click", async () => {
+  const el = document.getElementById("group-new-name"), name = el.value.trim();
+  if (!name) return;
+  el.value = "";
+  try { if (await (await groupsApi()).createGroup(name)) openGroups(); } catch (e) {}
+});
+async function openGroupDetail(gid, name) {
+  currentGroupId = gid; currentGroupName = name || "";
+  setGuideView("groupdetail");
+  document.getElementById("group-detail-title").textContent = currentGroupName;
+  document.getElementById("group-add-search").value = "";
+  await renderGroupDetail(null);
+}
+async function renderGroupDetail(searchResults) {
+  const body = document.getElementById("group-detail-body");
+  body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
+  try {
+    const g = await groupsApi();
+    const [members, board] = await Promise.all([g.listMembers(currentGroupId), g.groupBoard(currentGroupId)]);
+    const memberIds = new Set(members.map((m) => m.user_id));
+    let html = "";
+    if (searchResults && searchResults.length) {
+      html += '<div class="games-label">' + t("friends.results") + '</div>';
+      searchResults.forEach((u) => {
+        html += friendRow(u.username, memberIds.has(u.id)
+          ? '<span class="friend-tag">' + t("groups.member") + '</span>'
+          : '<button class="friend-act" data-addmember="' + u.id + '">' + t("friends.add") + '</button>');
+      });
+    }
+    html += '<div class="games-label">' + t("groups.membersLabel") + '</div>';
+    members.forEach((m) => html += friendRow(m.username || "?", ""));
+    html += '<div class="games-label">' + t("groups.board") + '</div>';
+    if (!board.length) html += '<div class="stat-line">' + t("groups.emptyBoard") + '</div>';
+    board.forEach((c) => {
+      // Leaderboard = the creator's own score (their benchmark) + everyone's attempts,
+      // ranked by distance then time.
+      const co = c.payload.o || {};
+      const rows = [{ username: c.creator_username, solved: !!co.solved, distance: Number(co.distance) || 0, time_sec: Number(co.timeSec) || 0 }];
+      (c.attempts || []).forEach((a) => { if (a.username !== c.creator_username) rows.push({ username: a.username, solved: a.solved, distance: Number(a.distance) || 0, time_sec: Number(a.time_sec) || 0 }); });
+      rows.sort((x, y) => (x.distance - y.distance) || (x.time_sec - y.time_sec));
+      html += '<div class="game-title">' + t("games.target", { n: c.payload.t }) + '</div><div class="lb">';
+      rows.slice(0, 8).forEach((a, i) => {
+        const me = a.username === authUsername;
+        html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(a.username || "?") + '</span><span class="res">' + (a.solved ? fmtTime(Math.round(a.time_sec)) : t("games.off", { d: a.distance })) + '</span></div>';
+      });
+      html += '</div>';
+    });
+    html += '<button class="friend-act danger" data-leave="1">' + t("groups.leave") + '</button>';
+    body.innerHTML = html;
+  } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+}
+document.getElementById("group-add-search").addEventListener("input", (e) => {
+  const q = e.target.value;
+  clearTimeout(groupSearchTimer);
+  groupSearchTimer = setTimeout(async () => {
+    if (!q.trim()) { renderGroupDetail(null); return; }
+    try { renderGroupDetail(await (await friendsApi()).searchUsers(q)); } catch (err) {}
+  }, 280);
+});
+document.getElementById("group-detail-body").addEventListener("click", async (e) => {
+  const add = e.target.closest("[data-addmember]"), leave = e.target.closest("[data-leave]");
+  if (add) { add.disabled = true; try { await (await groupsApi()).addMember(currentGroupId, add.dataset.addmember); document.getElementById("group-add-search").value = ""; renderGroupDetail(null); } catch (err) {} }
+  else if (leave) { try { await (await groupsApi()).leaveGroup(currentGroupId); openGroups(); } catch (err) {} }
+});
+document.getElementById("group-post").addEventListener("click", async () => {
+  const btn = document.getElementById("group-post");
+  btn.disabled = true;
+  try {
+    const ch = await import("./src/services/challenges.js");
+    const payload = buildSharePayload();
+    const cid = payload ? await ch.createChallenge(payload) : lastCreatedChallengeId;
+    if (cid) { await (await groupsApi()).shareToGroup(currentGroupId, cid); renderGroupDetail(null); showToast(t("groups.posted")); }
+    else showToast(t("groups.playFirst"));
+  } catch (e) { /* offline */ }
+  btn.disabled = false;
+});
+document.getElementById("group-back").addEventListener("click", openGroups);
 applyAuthState(null, null); // default: signed out
 (async () => {           // restore the session on load + track changes
   try {
