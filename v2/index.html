@@ -881,9 +881,23 @@
   #guide[data-view="auth"] .guide-auth-view,
   #guide[data-view="username"] .guide-username-view,
   #guide[data-view="account"] .guide-account-view,
+  #guide[data-view="stats"] .guide-stats-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  /* Ranked stats panel. */
+  .stats-body { display: flex; flex-direction: column; gap: 1.6vh; width: min(80vw, 330px); max-height: 66vh; overflow-y: auto; }
+  .stats-nums { display: flex; justify-content: space-around; gap: 3vw; }
+  .stat-num { text-align: center; }
+  .stat-num b { display: block; font-size: calc(var(--size-ui) * 1.7); font-weight: 700; color: var(--ink); }
+  .stat-num span { font-size: calc(var(--size-ui) * 0.78); color: var(--muted); }
+  .stat-line { font-size: calc(var(--size-ui) * 0.85); color: var(--muted); text-align: center; }
+  .stat-bars { display: flex; flex-direction: column; gap: 0.9vh; }
+  .stat-bar { display: grid; grid-template-columns: 3.6em 1fr 1.8em; align-items: center; gap: 0.55em; font-size: calc(var(--size-ui) * 0.8); }
+  .stat-bar .lbl { color: var(--muted); text-align: right; }
+  .stat-bar .track { height: 0.95em; border-radius: 0.5em; background: color-mix(in srgb, var(--ink) 12%, transparent); overflow: hidden; }
+  .stat-bar .fill { height: 100%; min-width: 2px; border-radius: 0.5em; background: var(--ink); transition: width 0.4s var(--ease-spring); }
+  .stat-bar .cnt { color: var(--ink); text-align: left; }
   .auth-input {
     font-family: var(--font);
     font-size: var(--size-ui);
@@ -1118,10 +1132,16 @@
       <button id="username-save" class="menu-btn" data-i18n="auth.save">save</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
     </div>
-    <!-- Signed-in account (profile placeholder — stats/friends come later). -->
+    <!-- Signed-in account (friends/challenges come later). -->
     <div class="menu-view guide-account-view">
       <div class="help-text" id="account-msg"></div>
+      <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- Ranked stats, rendered from game_results. -->
+    <div class="menu-view guide-stats-view">
+      <div id="stats-body" class="stats-body"></div>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <div class="menu-view guide-rules-view">
@@ -2730,6 +2750,18 @@ function endGame() {
   document.body.classList.add("won");
   saveState();
   if (celebrate) launchConfetti();
+  if (!sharedGame) recordGameResult(me, !practiceGame); // own game: count it; ranked also stores details
+}
+
+// Persist a finished own game (fire-and-forget; silent when signed out / offline).
+async function recordGameResult(outcome, ranked) {
+  try {
+    const s = await import("./src/services/stats.js");
+    await s.recordGame({
+      ranked, distance: outcome.distance, solved: !!outcome.solved,
+      timeSec: outcome.timeSec, target: currentTarget, goal: goalOf(outcome), score: outcome.score,
+    });
+  } catch (e) { /* signed out / offline — nothing to record */ }
 }
 
 /* ---------------- Confetti (win / beat) ---------------- */
@@ -3334,6 +3366,55 @@ document.querySelectorAll(".guide-signout").forEach((b) => b.addEventListener("c
   applyAuthState(null, null);
   setGuideView("choice");
 }));
+
+// ---- Ranked stats view ----
+document.getElementById("account-stats").addEventListener("click", openStats);
+async function openStats() {
+  setGuideView("stats");
+  const body = document.getElementById("stats-body");
+  body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
+  try { renderStats(await (await import("./src/services/stats.js")).getStats()); }
+  catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+}
+function renderStats(st) {
+  const body = document.getElementById("stats-body");
+  if (!st) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; return; }
+  const rows = st.ranked, n = rows.length;
+  let html = '<div class="stats-nums">'
+    + '<div class="stat-num"><b>' + st.totalPlayed + '</b><span>' + t("stats.games") + '</span></div>'
+    + '<div class="stat-num"><b>' + n + '</b><span>' + t("stats.ranked") + '</span></div>';
+  const exact = rows.filter((r) => r.solved || r.distance === 0).length;
+  if (n) html += '<div class="stat-num"><b>' + Math.round((exact / n) * 100) + '%</b><span>' + t("stats.exact") + '</span></div>';
+  html += '</div>';
+  if (!n) { html += '<div class="stat-line">' + t("stats.empty") + '</div>'; body.innerHTML = html; return; }
+  // Distance distribution in tens (exact / 1–10 / 11–20 / … / 50+).
+  const labels = [t("stats.bucketExact"), "1–10", "11–20", "21–30", "31–40", "41–50", "50+"];
+  const counts = new Array(7).fill(0);
+  rows.forEach((r) => { counts[r.distance === 0 ? 0 : Math.min(6, Math.ceil(r.distance / 10))]++; });
+  const max = Math.max(...counts, 1);
+  html += '<div class="stat-bars">';
+  for (let i = 0; i < 7; i++) html +=
+    '<div class="stat-bar"><div class="lbl">' + labels[i] + '</div>'
+    + '<div class="track"><div class="fill" style="width:' + (counts[i] / max) * 100 + '%"></div></div>'
+    + '<div class="cnt">' + counts[i] + '</div></div>';
+  html += '</div>';
+  // Solve times.
+  const solves = rows.filter((r) => r.solved || r.distance === 0);
+  if (solves.length) {
+    const avg = solves.reduce((a, r) => a + Number(r.time_sec), 0) / solves.length;
+    const fastest = Math.min(...solves.map((r) => Number(r.time_sec)));
+    html += '<div class="stat-line">' + t("stats.avgSolve", { t: fmtTime(Math.round(avg)) }) + ' · ' + t("stats.fastest", { t: fmtTime(Math.round(fastest)) }) + '</div>';
+  }
+  // Trend: recent vs earlier average distance.
+  if (n >= 6) {
+    const k = Math.min(10, Math.floor(n / 2));
+    const avgD = (arr) => arr.reduce((a, r) => a + r.distance, 0) / arr.length;
+    const rD = avgD(rows.slice(-k)), eD = avgD(rows.slice(0, -k));
+    const arrow = rD < eD - 0.5 ? " ▾" : rD > eD + 0.5 ? " ▴" : "";
+    html += '<div class="stat-line">' + t("stats.recent", { k, d: Math.round(rD) }) + arrow + '</div>';
+  }
+  body.innerHTML = html;
+}
 applyAuthState(null, null); // default: signed out
 (async () => {           // restore the session on load + track changes
   try {
@@ -3798,6 +3879,7 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
       return { expr, lineSum, lastResult, display: displayValEl.textContent, displayCls: displayEl.className,
         outcome: lastOutcome, slotUsed: slotUsed.slice(), currentTarget };
     },
+    renderStats(st) { openGuide(); setGuideView("stats"); renderStats(st); },
   };
 }
 </script>

@@ -33,6 +33,11 @@ export const I18N = {
     "auth.working": "one sec…", "auth.confirm": "check your email to confirm, then log in",
     "auth.wrongPass": "wrong password for that email", "auth.err": "something went wrong",
     "auth.offline": "can't reach the server", "auth.helloName": "signed in as {u}",
+    "stats.title": "stats", "stats.games": "games", "stats.ranked": "ranked",
+    "stats.exact": "exact", "stats.bucketExact": "exact",
+    "stats.empty": "play a ranked game to start tracking your stats",
+    "stats.avgSolve": "avg solve {t}", "stats.fastest": "fastest {t}",
+    "stats.recent": "last {k}: {d} away on avg",
     "overview": [
       "Reach the target number, or work all the way down to 0, using each of your six numbers exactly once.",
       "You don't have to be exact — you're scored by how close you get. If nobody solves it, the closest answer wins, and a faster time breaks ties.",
@@ -90,6 +95,11 @@ export const I18N = {
     "auth.working": "잠시만요…", "auth.confirm": "이메일을 확인해 인증한 뒤 로그인하세요",
     "auth.wrongPass": "비밀번호가 올바르지 않습니다", "auth.err": "문제가 발생했습니다",
     "auth.offline": "서버에 연결할 수 없습니다", "auth.helloName": "{u}(으)로 로그인됨",
+    "stats.title": "통계", "stats.games": "게임", "stats.ranked": "랭크",
+    "stats.exact": "정확", "stats.bucketExact": "정확",
+    "stats.empty": "랭크 게임을 플레이하면 통계가 기록됩니다",
+    "stats.avgSolve": "평균 해결 {t}", "stats.fastest": "최고 {t}",
+    "stats.recent": "최근 {k}: 평균 {d} 차이",
     "overview": [
       "여섯 개의 숫자를 각각 한 번씩만 사용해 목표 숫자에 도달하거나 0까지 줄이세요.",
       "꼭 정확할 필요는 없어요 — 얼마나 가까운지로 점수가 매겨집니다. 아무도 못 맞히면 가장 가까운 답이 이기고, 동점이면 더 빠른 기록이 이깁니다.",
