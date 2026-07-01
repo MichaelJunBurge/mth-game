@@ -877,10 +877,36 @@
     will-change: transform;
   }
   body.guide-open #guide { transform: translateY(0); }
-  #guide:not(.rules-open):not(.overview-open):not(.profile-open) .guide-choice { display: flex; }
-  #guide.rules-open .guide-rules-view { display: flex; }
-  #guide.overview-open .guide-overview-view { display: flex; }
-  #guide.profile-open .guide-profile-view { display: flex; }
+  /* Guide views: exactly one shows based on data-view (default = the choices). */
+  #guide[data-view="auth"] .guide-auth-view,
+  #guide[data-view="username"] .guide-username-view,
+  #guide[data-view="account"] .guide-account-view,
+  #guide[data-view="rules"] .guide-rules-view,
+  #guide[data-view="overview"] .guide-overview-view { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  .auth-input {
+    font-family: var(--font);
+    font-size: var(--size-ui);
+    font-weight: 700;
+    color: var(--ink);
+    background: none;
+    border: none;
+    border-bottom: 2px solid var(--dim);
+    padding: 0.35em 0.2em;
+    width: min(70vw, 260px);
+    text-align: center;
+    text-transform: none;   /* email / password keep their exact casing */
+    outline: none;
+  }
+  .auth-input::placeholder { color: var(--dim); }
+  .auth-input:focus { border-bottom-color: var(--ink); }
+  .auth-msg { font-size: calc(var(--size-ui) * 0.9); color: var(--muted); min-height: 1.2em; text-align: center; }
+  .menu-btn.danger { color: var(--red); }
+  /* Nav glyph swap: ? signed out, profile person signed in. (Selectors need to
+     outrank `.nav-icon svg { display:block }`, hence the `.nav-icon` prefix.) */
+  .nav-icon .glyph-profile { display: none; }
+  body.signed-in #nav-help .glyph-help { display: none; }
+  body.signed-in #nav-help .glyph-profile { display: block; }
 
   /* Walkthrough coach-mark: a spotlight + arrow + note pointing at the live UI. */
   /* pointer-events:auto so the dimmed area blocks the live UI during the tour. */
@@ -977,12 +1003,18 @@
     </svg>
   </button>
   <button id="nav-help" class="nav-icon nav-bottom" aria-label="How to play">
-    <!-- Question mark until login lands; once an account is signed in this swaps
-         to the person/profile glyph (the old #nav-profile, sized to match). -->
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <!-- Question mark while signed out; swaps to the profile glyph once signed in
+         (body.signed-in). Both live here; CSS shows one. -->
+    <svg class="glyph-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <g transform="translate(12 12) scale(1.3) translate(-12 -12)">
         <path vector-effect="non-scaling-stroke" d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
         <line vector-effect="non-scaling-stroke" x1="12" y1="17" x2="12.01" y2="17" />
+      </g>
+    </svg>
+    <svg class="glyph-profile" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <g transform="translate(12 12) scale(1.18) translate(-12 -12)">
+        <circle vector-effect="non-scaling-stroke" cx="12" cy="8.5" r="3.4" />
+        <path vector-effect="non-scaling-stroke" d="M5.5 19c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5" />
       </g>
     </svg>
   </button>
@@ -1065,13 +1097,31 @@
   <!-- Help (question-mark) overlay: Profile / Overview / Rules / Walkthrough. -->
   <div id="guide" class="sheet">
     <div class="menu-view guide-choice">
-      <button id="guide-profile" class="menu-btn" data-i18n="guide.profile">Profile</button>
+      <button id="guide-profile" class="menu-btn">profile</button>
       <button id="guide-overview" class="menu-btn" data-i18n="guide.overview">Overview</button>
       <button id="guide-rules" class="menu-btn" data-i18n="guide.rules">Rules</button>
       <button id="guide-walk" class="menu-btn" data-i18n="guide.walk">Walkthrough</button>
     </div>
-    <div class="menu-view guide-profile-view">
-      <div class="help-text" id="guide-profile-text" data-i18n="profile.soon">Profiles &amp; leaderboards are coming soon.</div>
+    <!-- Sign in / sign up (one action). -->
+    <div class="menu-view guide-auth-view">
+      <input id="auth-email" class="auth-input" type="email" inputmode="email" autocomplete="email" placeholder="email" />
+      <input id="auth-pass" class="auth-input" type="password" autocomplete="current-password" placeholder="password" />
+      <div class="auth-msg" id="auth-msg"></div>
+      <button id="auth-submit" class="menu-btn" data-i18n="auth.submit">log in / sign up</button>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- First-time: choose a username. -->
+    <div class="menu-view guide-username-view">
+      <div class="help-text" data-i18n="auth.pickName">pick a username</div>
+      <input id="username-input" class="auth-input" type="text" autocomplete="off" placeholder="username" maxlength="20" />
+      <div class="auth-msg" id="username-msg"></div>
+      <button id="username-save" class="menu-btn" data-i18n="auth.save">save</button>
+      <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
+    </div>
+    <!-- Signed-in account (profile placeholder — stats/friends come later). -->
+    <div class="menu-view guide-account-view">
+      <div class="help-text" id="account-msg"></div>
+      <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <div class="menu-view guide-rules-view">
@@ -2973,6 +3023,7 @@ function applyLang() {
   if (sub.style.display !== "none") sub.textContent = allUsedUp() ? t("submit") : t("quit");
   renderHelp();
   refreshHomeTimer(); // re-set the Ranked/Multiplayer intro word in the new language
+  applyAuthState(authSession, authUsername); // re-label the account button
   if (sharedGame) refreshBeat();
   if (document.body.classList.contains("tour-on")) renderTourStep();
 }
@@ -3203,25 +3254,95 @@ document.getElementById("menu-scale").addEventListener("input", (e) => setScale(
 
 /* ---------------- Help: question-mark popup + walkthrough ---------------- */
 const guideEl = document.getElementById("guide");
+// One guide view shows at a time (choice / auth / username / account / rules /
+// overview), driven by a data-view attribute. No attribute = the choices.
+function setGuideView(v) { if (!v || v === "choice") guideEl.removeAttribute("data-view"); else guideEl.dataset.view = v; }
 function openGuide() {
-  guideEl.classList.remove("rules-open", "overview-open"); // start at the choices
+  setGuideView("choice");
   closeMenu(false);                                        // never both at once
   document.body.classList.add("guide-open");
   pauseForOverlay();
 }
 function closeGuide() {
   document.body.classList.remove("guide-open");
-  guideEl.classList.remove("rules-open", "overview-open", "profile-open");
+  setGuideView("choice");
   resumeFromOverlay();
 }
-document.getElementById("guide-profile").addEventListener("click", () => guideEl.classList.add("profile-open"));
-document.getElementById("guide-rules").addEventListener("click", () => guideEl.classList.add("rules-open"));
-document.getElementById("guide-overview").addEventListener("click", () => guideEl.classList.add("overview-open"));
-document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => guideEl.classList.remove("rules-open", "overview-open", "profile-open")));
+document.getElementById("guide-profile").addEventListener("click", () => openAccount());
+document.getElementById("guide-rules").addEventListener("click", () => setGuideView("rules"));
+document.getElementById("guide-overview").addEventListener("click", () => setGuideView("overview"));
+document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => setGuideView("choice")));
 document.getElementById("guide-walk").addEventListener("click", () => { closeGuide(); startTour(); });
 // Tap the empty area of either overlay (not a button/control) to close it.
 menuEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, #menu-scale, button, input")) closeMenu(true); });
-guideEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, button")) closeGuide(); });
+guideEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, button, input, .auth-msg, .help-text")) closeGuide(); });
+
+/* ---------------- Account / profile (Supabase, lazy-loaded) ----------------
+   Loaded on demand so a CDN/network hiccup can never break the game itself. */
+let authMod = null, authSession = null, authUsername = null;
+async function authApi() { if (!authMod) authMod = await import("./src/services/auth.js"); return authMod; }
+function applyAuthState(session, username) {
+  authSession = session; authUsername = username;
+  document.body.classList.toggle("signed-in", !!session);
+  document.getElementById("nav-help").setAttribute("aria-label", session ? t("auth.profile") : t("auth.help"));
+  document.getElementById("guide-profile").textContent = session ? (username || t("auth.setName")) : t("auth.signin");
+}
+function showAccount(u) { document.getElementById("account-msg").textContent = t("auth.helloName", { u }); setGuideView("account"); }
+// Route the account button by state: sign-in form / username setup / account.
+function openAccount() {
+  if (!authSession) { setGuideView("auth"); setTimeout(() => { const e = document.getElementById("auth-email"); if (e) e.focus(); }, 60); }
+  else if (!authUsername) { document.getElementById("username-msg").textContent = ""; setGuideView("username"); }
+  else showAccount(authUsername);
+}
+async function submitAuth() {
+  const email = document.getElementById("auth-email").value.trim();
+  const pass = document.getElementById("auth-pass").value;
+  const msg = document.getElementById("auth-msg");
+  if (!email || !pass) { msg.textContent = t("auth.needBoth"); return; }
+  msg.textContent = t("auth.working");
+  try {
+    const a = await authApi();
+    const r = await a.loginOrSignup(email, pass);
+    if (r.status === "signedin") {
+      document.getElementById("auth-pass").value = "";
+      msg.textContent = "";
+      const s = await a.getSession(), u = await a.getUsername();
+      applyAuthState(s, u);
+      if (!u) { document.getElementById("username-msg").textContent = ""; setGuideView("username"); }
+      else showAccount(u);
+    } else if (r.status === "confirm") msg.textContent = t("auth.confirm");
+    else if (r.status === "wrongpassword") msg.textContent = t("auth.wrongPass");
+    else msg.textContent = r.message || t("auth.err");
+  } catch (e) { msg.textContent = t("auth.offline"); }
+}
+async function saveUsername() {
+  const msg = document.getElementById("username-msg");
+  msg.textContent = t("auth.working");
+  try {
+    const r = await (await authApi()).setUsername(document.getElementById("username-input").value);
+    if (r.ok) { applyAuthState(authSession, r.username); document.getElementById("username-input").value = ""; showAccount(r.username); }
+    else msg.textContent = r.message;
+  } catch (e) { msg.textContent = t("auth.offline"); }
+}
+document.getElementById("auth-submit").addEventListener("click", submitAuth);
+document.getElementById("username-save").addEventListener("click", saveUsername);
+document.getElementById("auth-email").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); document.getElementById("auth-pass").focus(); } });
+document.getElementById("auth-pass").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitAuth(); } });
+document.getElementById("username-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveUsername(); } });
+document.querySelectorAll(".guide-signout").forEach((b) => b.addEventListener("click", async () => {
+  try { await (await authApi()).signOut(); } catch (e) {}
+  applyAuthState(null, null);
+  setGuideView("choice");
+}));
+applyAuthState(null, null); // default: signed out
+(async () => {           // restore the session on load + track changes
+  try {
+    const a = await authApi();
+    const s = await a.getSession();
+    applyAuthState(s, s ? await a.getUsername() : null);
+    a.onAuth(async (session) => { applyAuthState(session, session ? await a.getUsername() : null); });
+  } catch (e) { /* offline / CDN down — game still works, no account UI */ }
+})();
 
 // The walkthrough drives a quick demo and points a spotlight + note at each part.
 const TOUR_STEPS = [
