@@ -826,6 +826,9 @@
     transition: transform 0.08s;
   }
   .menu-btn:hover { transform: scale(1.12); }
+  /* Icon-only menu entry (profile / help). */
+  .menu-icon-btn { display: flex; align-items: center; justify-content: center; padding: 0.1em; }
+  .menu-icon-btn svg { width: calc(var(--size-ui) * 1.7); height: calc(var(--size-ui) * 1.7); display: block; }
   /* Size slider — shrinks the whole game column (small ↔ large). Fixed px sizes
      so it stays usable at any scale. */
   .menu-slider {
@@ -1096,6 +1099,13 @@
 
   <div id="menu" class="menu">
     <div class="menu-view menu-main">
+      <!-- Profile / help — a click route to the guide (also reachable by swiping up). -->
+      <button id="menu-profile" class="menu-btn menu-icon-btn" aria-label="Profile and help">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="8.5" r="3.4" />
+          <path d="M5.5 19c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5" />
+        </svg>
+      </button>
       <button id="menu-submit" class="menu-btn">Quit</button>
       <button id="menu-resume" class="menu-btn" data-i18n="menu.resume">Resume</button>
       <button id="menu-reset" class="menu-btn" data-i18n="menu.reset">Reset</button>
@@ -1992,10 +2002,8 @@ function renderDots() {
   for (let i = 0; i < pageCount(); i++) {
     const d = document.createElement("div");
     d.className = "dot" + (i === pageIndex ? " active" : "") + (i === 0 ? " pad" : "");
-    // The dots sit where the home profile/help (?) icon lives — tap them to open
-    // the profile/help menu mid-game (a click route on desktop + mobile; page nav
-    // is still swipe / tap-a-side).
-    d.addEventListener("click", openGuide);
+    const to = i;
+    d.addEventListener("click", () => gotoPage(to));
     dotsEl.appendChild(d);
   }
   // A "+" at the right end while there's room: swipe right / tap it to add a calc.
@@ -3283,6 +3291,7 @@ function overlaySheetClose(el, sign, onClose) {
 }
 overlaySheetClose(menuEl, -1, () => closeMenu(true));                       // swipe up closes the menu
 overlaySheetClose(document.getElementById("guide"), 1, () => closeGuide()); // swipe down closes help
+document.getElementById("menu-profile").addEventListener("click", openGuide); // -> profile/help (openGuide closes the menu)
 document.getElementById("menu-submit").addEventListener("click", submitFromMenu);
 document.getElementById("menu-resume").addEventListener("click", () => closeMenu(true));
 document.getElementById("menu-reset").addEventListener("click", () => { closeMenu(false); restartShared(); });
