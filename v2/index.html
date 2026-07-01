@@ -856,6 +856,7 @@
     transition: transform 0.08s;
   }
   .menu-btn:hover { transform: scale(1.12); }
+  .guide-qmark { font-size: calc(var(--size-ui) * 1.3); font-weight: 700; }
   /* Icon-only menu entry (profile / help). */
   .menu-icon-btn { display: flex; align-items: center; justify-content: center; padding: 0.1em; }
   .menu-icon-btn svg { width: calc(var(--size-ui) * 1.7); height: calc(var(--size-ui) * 1.7); display: block; }
@@ -929,11 +930,12 @@
   #guide[data-view="groups"] .guide-groups-view,
   #guide[data-view="groupdetail"] .guide-groupdetail-view,
   #guide[data-view="sharepick"] .guide-sharepick-view,
+  #guide[data-view="help"] .guide-help-view,
   #guide[data-view="leaderboard"] .guide-leaderboard-view,
   #guide[data-view="h2h"] .guide-h2h-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="sharepick"]):not([data-view="leaderboard"]):not([data-view="h2h"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="sharepick"]):not([data-view="help"]):not([data-view="leaderboard"]):not([data-view="h2h"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
   /* Active games list. */
   .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
   .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
@@ -1216,9 +1218,14 @@
   <div id="guide" class="sheet">
     <div class="menu-view guide-choice">
       <button id="guide-profile" class="menu-btn">profile</button>
-      <button id="guide-overview" class="menu-btn" data-i18n="guide.overview">Overview</button>
+      <button id="guide-help" class="menu-btn guide-qmark" aria-label="help">?</button>
+    </div>
+    <!-- Help folder: how to play / rules / walkthrough (behind the "?"). -->
+    <div class="menu-view guide-help-view">
+      <button id="guide-overview" class="menu-btn" data-i18n="guide.overview">How to play</button>
       <button id="guide-rules" class="menu-btn" data-i18n="guide.rules">Rules</button>
       <button id="guide-walk" class="menu-btn" data-i18n="guide.walk">Walkthrough</button>
+      <button id="guide-help-back" class="menu-btn" data-i18n="menu.back">Back</button>
     </div>
     <!-- Sign in / sign up (one action). -->
     <div class="menu-view guide-auth-view">
@@ -1245,6 +1252,7 @@
       <button id="account-h2h" class="menu-btn" data-i18n="h2h.title">head to head</button>
       <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
       <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
+      <button id="account-help" class="menu-btn guide-qmark" aria-label="help">?</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
@@ -3676,7 +3684,7 @@ const guideEl = document.getElementById("guide");
 // overview), driven by a data-view attribute. No attribute = the choices.
 function setGuideView(v) { if (!v || v === "choice") guideEl.removeAttribute("data-view"); else guideEl.dataset.view = v; }
 function openGuide() {
-  setGuideView("choice");
+  if (authSession) openAccount(); else setGuideView("choice"); // signed in -> straight to the profile/account
   closeMenu(false);                                        // never both at once
   document.body.classList.add("guide-open");
   pauseForOverlay();
@@ -3691,6 +3699,11 @@ document.getElementById("guide-rules").addEventListener("click", () => setGuideV
 document.getElementById("guide-overview").addEventListener("click", () => setGuideView("overview"));
 document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => setGuideView("choice")));
 document.getElementById("guide-walk").addEventListener("click", beginWalkthrough);
+// The "?" folder: how to play / rules / walkthrough. Its Back returns to wherever
+// makes sense — the account view when signed in, else the choice screen.
+document.getElementById("guide-help").addEventListener("click", () => setGuideView("help"));
+document.getElementById("account-help").addEventListener("click", () => setGuideView("help"));
+document.getElementById("guide-help-back").addEventListener("click", () => { if (authSession) openAccount(); else setGuideView("choice"); });
 // Tap the empty area of either overlay (not a button/control) to close it.
 menuEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, #menu-scale-wrap, button, input")) closeMenu(true); });
 guideEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, button, input, .auth-msg, .help-text, .games-body, .friends-body, .stats-body")) closeGuide(); });
