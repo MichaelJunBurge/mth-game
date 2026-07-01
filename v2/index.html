@@ -236,7 +236,7 @@
     position: relative;
     z-index: 60;                 /* on the top layer so nothing can shadow the press */
     opacity: 1;
-    transition: opacity 0.3s ease;
+    transition: opacity 0.5s ease;   /* fade-out when tapped to reveal the game beneath */
   }
   body.mode-intro-on .mode-intro { display: flex; }
   .mode-intro:hover .intro-word { transform: scale(1.14); } /* hovering the area enlarges the word */
@@ -1425,7 +1425,7 @@ function revealMode() {
     setTimeout(() => contentEl.classList.remove("reveal-in"), 650);
   };
   intro.addEventListener("transitionend", once);
-  setTimeout(once, 360);                       // fallback if transitionend doesn't fire
+  setTimeout(once, 560);                       // fallback if transitionend doesn't fire (> the 0.5s fade)
 }
 
 // Slot-machine letter cycling for the intro word — mirrors the target reels: each
