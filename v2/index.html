@@ -956,6 +956,7 @@
   .beat-dot { display: none; }
   body.has-beat #nav-help .beat-dot { display: block; position: absolute; top: 0.1em; right: 0.1em; width: 0.42em; height: 0.42em; border-radius: 50%; background: var(--red); }
   body.has-beat #account-games::after { content: " ●"; color: var(--red); font-size: 0.7em; vertical-align: middle; }
+  body.has-group-invite #account-groups::after { content: " ●"; color: var(--red); font-size: 0.7em; vertical-align: middle; }
   /* Groups + group leaderboards. */
   .group-title { font-size: calc(var(--size-ui) * 1.15); font-weight: 700; color: var(--ink); text-align: center; }
   .lb { display: flex; flex-direction: column; gap: 0.1em; padding: 0.2em 0 0.5em 0.6em; }
@@ -3915,18 +3916,40 @@ async function openGroups() {
   const body = document.getElementById("groups-body");
   body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
   try {
-    const groups = await (await groupsApi()).listGroups();
-    let html = groups.length ? "" : '<div class="stat-line">' + t("groups.none") + '</div>';
+    const api = await groupsApi();
+    const [groups, invites] = await Promise.all([api.listGroups(), api.listInvites()]);
+    let html = "";
+    if (invites && invites.length) {   // pending "group created — accept/decline" invitations
+      html += '<div class="games-label">' + t("groups.invites") + '</div>';
+      invites.forEach((inv) => {
+        html += '<div class="game-row"><div class="game-main"><div class="game-title">' + escHtml(inv.name) + '</div><div class="game-sub">' + t("groups.invited", { u: escHtml(inv.inviter || "?") }) + '</div></div><div class="game-right"><button class="friend-act" data-acceptinv="' + inv.group_id + '">' + t("friends.accept") + '</button><button class="friend-act danger" data-declineinv="' + inv.group_id + '">' + t("friends.decline") + '</button></div></div>';
+      });
+    }
+    html += groups.length ? '<div class="games-label">' + t("groups.title") + '</div>' : (invites && invites.length ? "" : '<div class="stat-line">' + t("groups.none") + '</div>');
     groups.forEach((g) => {
       html += '<div class="game-row" data-group="' + g.id + '" data-name="' + escHtml(g.name) + '"><div class="game-main"><div class="game-title">' + escHtml(g.name) + '</div><div class="game-sub">' + t("groups.membersN", { n: g.members }) + '</div></div><div class="game-right">›</div></div>';
     });
     body.innerHTML = html;
   } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
 }
-document.getElementById("groups-body").addEventListener("click", (e) => {
+document.getElementById("groups-body").addEventListener("click", async (e) => {
+  const acc = e.target.closest("[data-acceptinv]"), dec = e.target.closest("[data-declineinv]");
+  if (acc || dec) {
+    e.stopPropagation();
+    const btn = acc || dec;
+    btn.disabled = true;
+    try { await (await groupsApi()).respondInvite(btn.dataset.acceptinv || btn.dataset.declineinv, !!acc); } catch (err) {}
+    openGroups(); checkGroupInvites();
+    return;
+  }
   const row = e.target.closest("[data-group]");
   if (row) openGroupDetail(row.dataset.group, row.dataset.name);
 });
+// Red dot on the Groups button when you have pending invites (mirrors the beat dot).
+async function checkGroupInvites() {
+  if (!authSession) { document.body.classList.remove("has-group-invite"); return; }
+  try { const inv = await (await groupsApi()).listInvites(); document.body.classList.toggle("has-group-invite", inv.length > 0); } catch (e) {}
+}
 document.getElementById("group-create").addEventListener("click", async () => {
   const el = document.getElementById("group-new-name"), name = el.value.trim();
   if (!name) return;
@@ -3945,7 +3968,7 @@ async function renderGroupDetail(searchResults) {
   body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
   try {
     const g = await groupsApi();
-    const [members, board] = await Promise.all([g.listMembers(currentGroupId), g.groupBoard(currentGroupId)]);
+    const [members, board, standings] = await Promise.all([g.listMembers(currentGroupId), g.groupBoard(currentGroupId), g.standings(currentGroupId)]);
     const memberIds = new Set(members.map((m) => m.user_id));
     let html = "";
     if (searchResults && searchResults.length) {
@@ -3955,6 +3978,18 @@ async function renderGroupDetail(searchResults) {
           ? '<span class="friend-tag">' + t("groups.member") + '</span>'
           : '<button class="friend-act" data-addmember="' + u.id + '">' + t("friends.add") + '</button>');
       });
+    }
+    // Within-group standings (points from every game played together) + trophies.
+    // Empty until v2/sql/groups-v2.sql is run; then it leads the detail view.
+    if (standings && standings.length) {
+      html += '<div class="games-label">' + t("groups.standings") + '</div><div class="lb">';
+      standings.forEach((s, i) => {
+        const me = s.username === authUsername;
+        const trophy = (s.fastest ? '<span class="trophy" title="' + t("trophy.fastest") + '">⚡</span>' : '') +
+                       (s.most_correct ? '<span class="trophy" title="' + t("trophy.correct") + '">👓</span>' : '');
+        html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(s.username || "?") + trophy + '</span><span class="res">' + t("groups.pts", { p: s.points }) + '</span></div>';
+      });
+      html += '</div>';
     }
     html += '<div class="games-label">' + t("groups.membersLabel") + '</div>';
     members.forEach((m) => html += friendRow(m.username || "?", ""));
@@ -3988,7 +4023,7 @@ document.getElementById("group-add-search").addEventListener("input", (e) => {
 });
 document.getElementById("group-detail-body").addEventListener("click", async (e) => {
   const add = e.target.closest("[data-addmember]"), leave = e.target.closest("[data-leave]");
-  if (add) { add.disabled = true; try { await (await groupsApi()).addMember(currentGroupId, add.dataset.addmember); document.getElementById("group-add-search").value = ""; renderGroupDetail(null); } catch (err) {} }
+  if (add) { add.disabled = true; try { const api = await groupsApi(); const r = await api.inviteMember(currentGroupId, add.dataset.addmember); if (!r.ok) await api.addMember(currentGroupId, add.dataset.addmember); /* pre-SQL fallback: direct add */ document.getElementById("group-add-search").value = ""; renderGroupDetail(null); } catch (err) {} }
   else if (leave) { try { await (await groupsApi()).leaveGroup(currentGroupId); openGroups(); } catch (err) {} }
 });
 document.getElementById("group-post").addEventListener("click", async () => {
@@ -4060,8 +4095,8 @@ applyAuthState(null, null); // default: signed out
     const a = await authApi();
     const s = await a.getSession();
     applyAuthState(s, s ? await a.getUsername() : null);
-    checkBeatBadge();
-    a.onAuth(async (session) => { applyAuthState(session, session ? await a.getUsername() : null); checkBeatBadge(); });
+    checkBeatBadge(); checkGroupInvites();
+    a.onAuth(async (session) => { applyAuthState(session, session ? await a.getUsername() : null); checkBeatBadge(); checkGroupInvites(); });
   } catch (e) { /* offline / CDN down — game still works, no account UI */ }
 })();
 
