@@ -2564,14 +2564,17 @@ stageEl.addEventListener("click", (e) => {
     commitModeSwipe(e.clientX > window.innerWidth / 2); // tap right -> right neighbour enters from the right (like the game pages)
   }
 });
-// Desktop trackpad: two-finger swipes mirror mobile swipes. One window-level
-// handler (so it also works while a sheet covers the screen) with a per-gesture
-// AXIS LOCK — the accumulated direction picks horizontal (page/mode nav) vs
-// vertical (open/close sheets) and stays that way for the gesture, so mixed
-// deltas don't flip. The gesture timer refreshes on EVERY event, so one gesture
-// (incl. its momentum tail) commits exactly one action. No `animating` guard, so
-// swipes work mid-animation too. deltaX/Y are the inverse of finger movement.
-let gDX = 0, gDY = 0, gWheelTimer = null, gWheelLock = false;
+// Desktop trackpad: two-finger swipes mirror mobile swipes, via one window-level
+// handler (so it works while a sheet covers the screen). Fires once per swipe with
+// a per-gesture AXIS LOCK (accumulated dx/dy picks horizontal page/mode-nav vs
+// vertical sheets). After a swipe fires we lock and ignore its momentum tail — but
+// the tail's magnitude decays toward zero, so once it has DIPPED near zero the next
+// firm push is recognised as a fresh swipe and re-fires. (Magnitude alone can't do
+// this: a normal swipe accelerates, so "bigger than last" would double-fire on its
+// own rising edge — the dip is what marks the boundary between gestures.) A 90ms
+// idle reset also clears state between separated swipes. No `animating` guard, so
+// swipes work mid-animation. deltaX/Y = -finger movement.
+let gDX = 0, gDY = 0, gWheelIdle = null, gWheelLock = false, gDipped = false;
 window.addEventListener("wheel", (e) => {
   if (Math.abs(e.deltaX) < 0.5 && Math.abs(e.deltaY) < 0.5) return;
   // Let genuinely-scrollable overlay text scroll instead of hijacking the swipe.
@@ -2581,22 +2584,28 @@ window.addEventListener("wheel", (e) => {
     if (!((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom))) return;
   }
   e.preventDefault();
-  clearTimeout(gWheelTimer);
-  gWheelTimer = setTimeout(() => { gDX = 0; gDY = 0; gWheelLock = false; }, 300);
-  if (gWheelLock) return;                                  // already acted this gesture (incl. momentum)
+  const mag = Math.abs(e.deltaX) + Math.abs(e.deltaY);
+  clearTimeout(gWheelIdle);
+  gWheelIdle = setTimeout(() => { gDX = 0; gDY = 0; gWheelLock = false; gDipped = false; }, 90);
+  if (gWheelLock) {                                        // already fired this gesture
+    if (mag < 6) gDipped = true;                           // its momentum has (nearly) died out
+    else if (gDipped && mag > 12) { gWheelLock = false; gDipped = false; gDX = 0; gDY = 0; } // fresh push -> new swipe
+    else return;                                           // still the same gesture / its momentum tail
+  }
   gDX += e.deltaX; gDY += e.deltaY;
   const horiz = Math.abs(gDX) >= Math.abs(gDY);
-  if ((horiz ? Math.abs(gDX) : Math.abs(gDY)) < 45) return;
-  gWheelLock = true;
+  if ((horiz ? Math.abs(gDX) : Math.abs(gDY)) < 30) return;
+  const dirX = gDX, dirY = gDY;
+  gWheelLock = true; gDX = 0; gDY = 0;
   const menuOpen = document.body.classList.contains("menu-open");
   const guideOpen = document.body.classList.contains("guide-open");
   if (horiz) {
     if (menuOpen || guideOpen || document.body.classList.contains("tour-on")) return; // no page-nav under a sheet
-    const dx = -gDX;
+    const dx = -dirX;
     if (document.body.classList.contains("playing")) commitSwipe(dx > 0 ? 1 : -1);
     else if (canHomeModeSwipe()) commitModeSwipe(dx < 0);
   } else {
-    const up = -gDY < 0;                                   // finger moved up
+    const up = -dirY < 0;                                  // finger moved up
     if (menuOpen) { if (up) closeMenu(true); }             // swipe up closes the top menu
     else if (guideOpen) { if (!up) closeGuide(); }         // swipe down closes the help sheet
     else if (up) openGuide(); else openMenu();             // nothing open: up = help, down = menu
