@@ -891,9 +891,10 @@
   #guide[data-view="games"] .guide-games-view,
   #guide[data-view="groups"] .guide-groups-view,
   #guide[data-view="groupdetail"] .guide-groupdetail-view,
+  #guide[data-view="leaderboard"] .guide-leaderboard-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="leaderboard"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
   /* Active games list. */
   .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
   .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
@@ -1191,9 +1192,15 @@
       <div class="help-text" id="account-msg"></div>
       <button id="account-games" class="menu-btn" data-i18n="games.title">active games</button>
       <button id="account-groups" class="menu-btn" data-i18n="groups.title">groups</button>
+      <button id="account-leaderboard" class="menu-btn" data-i18n="lb.title">leaderboard</button>
       <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
       <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- Global ranked leaderboard. -->
+    <div class="menu-view guide-leaderboard-view">
+      <div id="leaderboard-body" class="games-body"></div>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <!-- Active games: challenges I sent (with attempts) + ones I've played. -->
@@ -3767,6 +3774,25 @@ document.getElementById("group-post").addEventListener("click", async () => {
   btn.disabled = false;
 });
 document.getElementById("group-back").addEventListener("click", openGroups);
+
+// ---- Global ranked leaderboard ----
+document.getElementById("account-leaderboard").addEventListener("click", openLeaderboard);
+async function openLeaderboard() {
+  setGuideView("leaderboard");
+  const body = document.getElementById("leaderboard-body");
+  body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
+  try {
+    const { rows, me } = await (await import("./src/services/stats.js")).getLeaderboard();
+    if (!rows.length) { body.innerHTML = '<div class="stat-line">' + t("lb.empty") + '</div>'; return; }
+    let html = '<div class="games-label">' + t("lb.title") + '</div><div class="lb">';
+    rows.forEach((r) => {
+      const isMe = r.user_id === me;
+      html += '<div class="lb-row' + (isMe ? " me" : "") + '"><span class="rank">' + r.rnk + '</span><span class="who">' + escHtml(r.username || "?") + '</span><span class="res">' + t("lb.pts", { p: r.points }) + '</span></div>';
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+}
 applyAuthState(null, null); // default: signed out
 (async () => {           // restore the session on load + track changes
   try {

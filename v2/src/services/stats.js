@@ -37,3 +37,10 @@ export async function getStats() {
   ]);
   return { totalPlayed: (prof.data && prof.data.games_played) || 0, ranked: res.data || [] };
 }
+
+// The global ranked standings (top players by points) + my own id to highlight me.
+export async function getLeaderboard() {
+  const s = await getSession();
+  const { data, error } = await supabase.rpc("ranked_leaderboard");
+  return { rows: error ? [] : (data || []), me: s ? s.user.id : null };
+}
