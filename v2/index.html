@@ -940,6 +940,7 @@
   .game-row.disabled { opacity: 0.4; pointer-events: none; }   /* a group you can't send to yet (shows the countdown) */
   .trophy { margin-left: 0.35em; font-size: 0.9em; }
   .game-status { color: var(--muted); font-weight: 400; font-size: 0.85em; }
+  .new-dot { display: inline-block; width: 0.5em; height: 0.5em; border-radius: 50%; background: var(--red); margin-right: 0.4em; vertical-align: middle; }
   .game-main { display: flex; flex-direction: column; gap: 0.15em; min-width: 0; }
   .game-title { font-size: calc(var(--size-ui) * 0.92); color: var(--ink); }
   .game-sub { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); }
@@ -3928,7 +3929,8 @@ async function openGroups() {
     }
     html += groups.length ? '<div class="games-label">' + t("groups.title") + '</div>' : (invites && invites.length ? "" : '<div class="stat-line">' + t("groups.none") + '</div>');
     groups.forEach((g) => {
-      html += '<div class="game-row" data-group="' + g.id + '" data-name="' + escHtml(g.name) + '"><div class="game-main"><div class="game-title">' + escHtml(g.name) + '</div><div class="game-sub">' + t("groups.membersN", { n: g.members }) + '</div></div><div class="game-right">›</div></div>';
+      const dot = groupNews.has(g.id) ? '<span class="new-dot"></span>' : '';
+      html += '<div class="game-row" data-group="' + g.id + '" data-name="' + escHtml(g.name) + '"><div class="game-main"><div class="game-title">' + escHtml(g.name) + '</div><div class="game-sub">' + t("groups.membersN", { n: g.members }) + '</div></div><div class="game-right">' + dot + '›</div></div>';
     });
     body.innerHTML = html;
   } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
@@ -3946,10 +3948,30 @@ document.getElementById("groups-body").addEventListener("click", async (e) => {
   const row = e.target.closest("[data-group]");
   if (row) openGroupDetail(row.dataset.group, row.dataset.name);
 });
-// Red dot on the Groups button when you have pending invites (mirrors the beat dot).
+// Red dot on the Groups button (mirrors the beat dot) for pending invites OR a group
+// game you're in that just finished (everyone played) and you haven't opened yet.
+// `groupNews` = group ids with such a completion → a dot in the groups list too.
+const GROUPS_SEEN_KEY = "numbersRound.groupsSeen.v2";
+let groupNews = new Set(), hasGroupInvites = false;
+function updateGroupBadge() { document.body.classList.toggle("has-group-invite", hasGroupInvites || groupNews.size > 0); }
+function markGroupGamesSeen(cids) {
+  if (!cids.length) return;
+  const s = new Set(storage.getJSON(GROUPS_SEEN_KEY) || []);
+  cids.forEach((c) => s.add(c));
+  storage.setJSON(GROUPS_SEEN_KEY, [...s]);
+}
 async function checkGroupInvites() {
-  if (!authSession) { document.body.classList.remove("has-group-invite"); return; }
-  try { const inv = await (await groupsApi()).listInvites(); document.body.classList.toggle("has-group-invite", inv.length > 0); } catch (e) {}
+  if (!authSession) { document.body.classList.remove("has-group-invite"); groupNews = new Set(); hasGroupInvites = false; return; }
+  try {
+    const api = await groupsApi();
+    const [invites, groups] = await Promise.all([api.listInvites(), api.listGroups()]);
+    hasGroupInvites = !!(invites && invites.length);
+    const seen = new Set(storage.getJSON(GROUPS_SEEN_KEY) || []);
+    groupNews = new Set();
+    const per = await Promise.all((groups || []).map((gr) => api.games(gr.id).then((gms) => [gr.id, gms || []]).catch(() => [gr.id, []])));
+    per.forEach(([gid, gms]) => gms.forEach((gm) => { if (gm.completed && (gm.i_sent || gm.i_played) && !seen.has(gm.cid)) groupNews.add(gid); }));
+    updateGroupBadge();
+  } catch (e) {}
 }
 document.getElementById("group-create").addEventListener("click", async () => {
   const el = document.getElementById("group-new-name"), name = el.value.trim();
@@ -3970,6 +3992,9 @@ async function renderGroupDetail(searchResults) {
   try {
     const g = await groupsApi();
     const [members, games, standings] = await Promise.all([g.listMembers(currentGroupId), g.games(currentGroupId), g.standings(currentGroupId)]);
+    // Opening a group's detail (its scoreboards) clears its completion notification.
+    markGroupGamesSeen((games || []).filter((gm) => gm.completed).map((gm) => gm.cid));
+    groupNews.delete(currentGroupId); updateGroupBadge();
     const memberIds = new Set(members.map((m) => m.user_id));
     let html = "";
     if (searchResults && searchResults.length) {
