@@ -267,7 +267,7 @@
   .intro-letter.spinning { color: var(--dim); }
   /* "coming soon" is absolutely positioned just below the centred word, so showing
      it doesn't shift the word up — the word stays centred. */
-  .intro-soon {
+  .intro-soon, .intro-login {
     position: absolute;
     top: 50%;
     left: 0;
@@ -281,6 +281,9 @@
     transition: opacity 0.25s ease;
   }
   .mode-intro.revealed .intro-soon { opacity: 0.7; }   /* Multiplayer only */
+  /* Ranked, logged out: tapping the word shows a tappable "log in to play". */
+  .intro-login { background: none; border: none; cursor: pointer; text-decoration: underline; pointer-events: none; }
+  .mode-intro.needlogin .intro-login { opacity: 0.85; pointer-events: auto; }
   /* The game fades in gently when the Ranked intro is dismissed — slow enough to
      read as "this was behind the word", not a redirect. */
   @keyframes reveal-in { from { opacity: 0; } to { opacity: 1; } }
@@ -1160,6 +1163,7 @@
       <div id="mode-intro" class="mode-intro">
         <button id="intro-word" class="intro-word">Multiplayer</button>
         <div id="intro-soon" class="intro-soon" data-i18n="mp.soon">Coming soon</div>
+        <button id="intro-login" class="intro-login" data-i18n="ranked.login">log in to play</button>
       </div>
     </div>
   </main>
@@ -1407,7 +1411,7 @@ function refreshHomeTimer() {
   b.classList.toggle("mode-intro-on", intro);
   if (intro) {
     setIntroWord(introWordText());
-    document.getElementById("mode-intro").classList.remove("revealed", "leaving");
+    document.getElementById("mode-intro").classList.remove("revealed", "leaving", "needlogin");
   }
   if (onHome && gameMode === "ranked" && rankedRevealed) {
     timerEl.textContent = fmtTime(TIMED_SEC); // 02:00 budget
@@ -2532,7 +2536,7 @@ function commitModeSwipe(goRight) { // goRight: go to the right neighbour (new p
   const W = window.innerWidth, s = goRight ? -1 : 1; // old page exits AWAY from the new one (it enters from the tapped side)
   rankedRevealed = false; practiceRevealed = false;  // each landing on a page re-shows its intro word
   clearIntroAnim();                                  // stop the outgoing page's letters
-  document.getElementById("mode-intro").classList.remove("revealed", "leaving");
+  document.getElementById("mode-intro").classList.remove("revealed", "leaving", "needlogin");
   contentEl.style.transition = "transform 0.16s ease-in";
   setContentDrag(s * W);                              // current page exits, the new one comes from the opposite side
   setTimeout(() => {
@@ -3500,11 +3504,14 @@ function restartShared() {
 timerEl.addEventListener("click", openMenu);
 document.getElementById("nav-menu").addEventListener("click", openMenu);
 document.getElementById("nav-help").addEventListener("click", openGuide);
-// Mode intro action: Ranked/Practice fade away to reveal the game; Multiplayer
-// toggles "Coming soon".
+// Mode intro action: Practice fades to reveal the game; Ranked does too once
+// signed in, but logged-out taps toggle "log in to play" (ranked feeds the global
+// ranking, so it needs an account); Multiplayer toggles "Coming soon".
 function triggerIntroWord() {
-  if (gameMode === "multiplayer") document.getElementById("mode-intro").classList.toggle("revealed"); // tap toggles "coming soon"
-  else revealMode(); // ranked or practice
+  const intro = document.getElementById("mode-intro");
+  if (gameMode === "multiplayer") { intro.classList.toggle("revealed"); return; }
+  if (gameMode === "ranked" && !authSession) { intro.classList.toggle("needlogin"); return; }
+  revealMode(); // ranked (signed in) or practice
 }
 // The ENTIRE centred intro area is the button (the word alone is a tiny target, so
 // taps that miss it used to fall through to the stage's page navigation). A tap
@@ -3515,6 +3522,13 @@ document.getElementById("mode-intro").addEventListener("click", (e) => {
   e.stopPropagation();
   if (gestureMoved) return; // this interaction was a swipe (a drag navigated) — don't also reveal
   triggerIntroWord();
+});
+// "log in to play" (Ranked, logged out) -> open the help/profile sheet on the login
+// view. stopPropagation so the surrounding mode-intro tap doesn't toggle it back off.
+document.getElementById("intro-login").addEventListener("click", (e) => {
+  e.stopPropagation();
+  openGuide();
+  openAccount();
 });
 document.getElementById("menu-lang").addEventListener("click", toggleLang);
 
@@ -3592,6 +3606,7 @@ async function authApi() { if (!authMod) authMod = await import("./src/services/
 function applyAuthState(session, username) {
   authSession = session; authUsername = username;
   document.body.classList.toggle("signed-in", !!session);
+  if (session) document.getElementById("mode-intro").classList.remove("needlogin"); // signed in -> drop the ranked gate prompt
   document.getElementById("nav-help").setAttribute("aria-label", session ? t("auth.profile") : t("auth.help"));
   document.getElementById("guide-profile").textContent = session ? (username || t("auth.setName")) : t("auth.signin");
 }
