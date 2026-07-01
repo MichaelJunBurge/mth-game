@@ -892,9 +892,10 @@
   #guide[data-view="groups"] .guide-groups-view,
   #guide[data-view="groupdetail"] .guide-groupdetail-view,
   #guide[data-view="leaderboard"] .guide-leaderboard-view,
+  #guide[data-view="h2h"] .guide-h2h-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="leaderboard"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="leaderboard"]):not([data-view="h2h"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
   /* Active games list. */
   .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
   .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
@@ -1193,6 +1194,7 @@
       <button id="account-games" class="menu-btn" data-i18n="games.title">active games</button>
       <button id="account-groups" class="menu-btn" data-i18n="groups.title">groups</button>
       <button id="account-leaderboard" class="menu-btn" data-i18n="lb.title">leaderboard</button>
+      <button id="account-h2h" class="menu-btn" data-i18n="h2h.title">head to head</button>
       <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
       <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
@@ -1201,6 +1203,11 @@
     <!-- Global ranked leaderboard. -->
     <div class="menu-view guide-leaderboard-view">
       <div id="leaderboard-body" class="games-body"></div>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- Head-to-head: win/loss records vs everyone you've challenged. -->
+    <div class="menu-view guide-h2h-view">
+      <div id="h2h-body" class="games-body"></div>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <!-- Active games: challenges I sent (with attempts) + ones I've played. -->
@@ -3774,6 +3781,37 @@ document.getElementById("group-post").addEventListener("click", async () => {
   btn.disabled = false;
 });
 document.getElementById("group-back").addEventListener("click", openGroups);
+
+// ---- Head-to-head records (computed from challenge data; no extra table) ----
+document.getElementById("account-h2h").addEventListener("click", openH2H);
+async function openH2H() {
+  setGuideView("h2h");
+  const body = document.getElementById("h2h-body");
+  body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
+  try {
+    const c = await import("./src/services/challenges.js");
+    const [sent, played] = await Promise.all([c.listSent(), c.listPlayed()]);
+    const map = new Map();
+    const tally = (uname, mine, theirs) => {
+      if (!uname || uname === authUsername) return;
+      if (!map.has(uname)) map.set(uname, { username: uname, games: 0, wins: 0, losses: 0 });
+      const e = map.get(uname); e.games++;
+      const v = verdict(mine, theirs);
+      if (v === "win") e.wins++; else if (v === "lose") e.losses++;
+    };
+    // My challenges: I'm the benchmark (payload.o), each attempter is an opponent.
+    sent.forEach((ch) => { const mine = gOut(ch.payload.o); (ch.attempts || []).forEach((a) => tally(a.username, mine, gOut(a))); });
+    // Challenges I played: my attempt vs the creator's benchmark.
+    played.forEach((p) => tally(p.challenge.creator_username, gOut(p.attempt), gOut(p.challenge.payload.o)));
+    const rows = [...map.values()].sort((a, b) => b.games - a.games || b.wins - a.wins);
+    if (!rows.length) { body.innerHTML = '<div class="stat-line">' + t("h2h.empty") + '</div>'; return; }
+    let html = '<div class="lb">';
+    rows.forEach((r) => {
+      html += '<div class="lb-row"><span class="who">' + escHtml(r.username) + '</span><span class="res">' + t("h2h.record", { w: r.wins, l: r.losses, n: r.games }) + '</span></div>';
+    });
+    body.innerHTML = html + '</div>';
+  } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+}
 
 // ---- Global ranked leaderboard ----
 document.getElementById("account-leaderboard").addEventListener("click", openLeaderboard);

@@ -59,6 +59,8 @@ export const I18N = {
     "groups.postGame": "share your last game", "groups.posted": "posted to the group",
     "groups.playFirst": "finish a game first", "groups.leave": "leave group",
     "lb.title": "leaderboard", "lb.pts": "{p} pts", "lb.empty": "play a ranked game to join the leaderboard",
+    "h2h.title": "head to head", "h2h.record": "{w}W {l}L · {n} games",
+    "h2h.empty": "challenge friends to build up records",
     "overview": [
       "Reach the target number, or work all the way down to 0, using each of your six numbers exactly once.",
       "You don't have to be exact — you're scored by how close you get. If nobody solves it, the closest answer wins, and a faster time breaks ties.",
@@ -142,6 +144,8 @@ export const I18N = {
     "groups.postGame": "마지막 게임 공유", "groups.posted": "그룹에 게시됨",
     "groups.playFirst": "게임을 먼저 끝내세요", "groups.leave": "그룹 나가기",
     "lb.title": "리더보드", "lb.pts": "{p}점", "lb.empty": "랭크 게임을 플레이하면 리더보드에 오릅니다",
+    "h2h.title": "상대 전적", "h2h.record": "{w}승 {l}패 · {n}게임",
+    "h2h.empty": "친구에게 도전해 전적을 쌓아보세요",
     "overview": [
       "여섯 개의 숫자를 각각 한 번씩만 사용해 목표 숫자에 도달하거나 0까지 줄이세요.",
       "꼭 정확할 필요는 없어요 — 얼마나 가까운지로 점수가 매겨집니다. 아무도 못 맞히면 가장 가까운 답이 이기고, 동점이면 더 빠른 기록이 이깁니다.",
