@@ -4,9 +4,9 @@
 export const I18N = {
   en: {
     "menu.resume": "Resume", "menu.reset": "Reset", "menu.home": "Home",
-    "menu.help": "Help", "menu.back": "Back", "menu.lang": "한국어",
+    "menu.help": "Help", "menu.back": "Back", "menu.lang": "language (english)",
     "theme.dark": "Dark mode", "theme.light": "Light mode",
-    "auto.on": "Auto (=) on", "auto.off": "Auto (=) off", "auto.sign": "Auto ({s})",
+    "auto.on": "auto = (on)", "auto.off": "auto = (off)", "auto.sign": "Auto ({s})",
     "quit": "End game", "submit": "Submit",
     "guide.walk": "Walkthrough", "guide.rules": "Rules",
     "win.solvedIn": "Solved in", "win.yourScore": "Your score",
@@ -89,9 +89,9 @@ export const I18N = {
   },
   ko: {
     "menu.resume": "계속하기", "menu.reset": "다시하기", "menu.home": "홈",
-    "menu.help": "도움말", "menu.back": "뒤로", "menu.lang": "English",
+    "menu.help": "도움말", "menu.back": "뒤로", "menu.lang": "언어 (한국어)",
     "theme.dark": "다크 모드", "theme.light": "라이트 모드",
-    "auto.on": "자동 (=) 켜짐", "auto.off": "자동 (=) 꺼짐", "auto.sign": "자동 ({s})",
+    "auto.on": "자동 = (켜짐)", "auto.off": "자동 = (꺼짐)", "auto.sign": "자동 ({s})",
     "quit": "게임 종료", "submit": "제출",
     "guide.walk": "둘러보기", "guide.rules": "규칙",
     "win.solvedIn": "해결 시간", "win.yourScore": "내 점수",
