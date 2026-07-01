@@ -927,15 +927,18 @@
   #guide[data-view="games"] .guide-games-view,
   #guide[data-view="groups"] .guide-groups-view,
   #guide[data-view="groupdetail"] .guide-groupdetail-view,
+  #guide[data-view="sharepick"] .guide-sharepick-view,
   #guide[data-view="leaderboard"] .guide-leaderboard-view,
   #guide[data-view="h2h"] .guide-h2h-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="leaderboard"]):not([data-view="h2h"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="groups"]):not([data-view="groupdetail"]):not([data-view="sharepick"]):not([data-view="leaderboard"]):not([data-view="h2h"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
   /* Active games list. */
   .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
   .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
   .game-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; padding: 0.4em 0; cursor: pointer; }
+  .game-row.disabled { opacity: 0.4; pointer-events: none; }   /* a group you can't send to yet (shows the countdown) */
+  .trophy { margin-left: 0.35em; font-size: 0.9em; }
   .game-main { display: flex; flex-direction: column; gap: 0.15em; min-width: 0; }
   .game-title { font-size: calc(var(--size-ui) * 0.92); color: var(--ink); }
   .game-sub { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); }
@@ -1269,6 +1272,12 @@
       <div id="group-detail-body" class="games-body"></div>
       <button id="group-post" class="menu-btn" data-i18n="groups.postGame">share your last game</button>
       <button id="group-back" class="menu-btn guide-back-inner" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- Share picker (logged in): send this game to one of your groups, or a link. -->
+    <div class="menu-view guide-sharepick-view">
+      <div id="sharepick-body" class="games-body"></div>
+      <button id="share-as-link" class="menu-btn" data-i18n="share.asLink">share a link</button>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <!-- Ranked stats, rendered from game_results. -->
     <div class="menu-view guide-stats-view">
@@ -3302,8 +3311,58 @@ async function sharePuzzle() {
   else showToast(link);
 }
 
+// Countdown like "3h 12m" until an ISO timestamp (a group's active game freeing up).
+function fmtCountdown(iso) {
+  const ms = iso ? new Date(iso).getTime() - Date.now() : 0;
+  if (!(ms > 0)) return "0m";
+  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  return h > 0 ? h + "h " + m + "m" : m + "m";
+}
+// Signed-in Share opens a picker: send this game to one of your groups (dimmed +
+// countdown when you already have an active game there), or share a plain link.
+// Needs v2/sql/groups-v2.sql for the send rules; degrades to "always sendable".
+async function openSharePicker() {
+  if (!buildSharePayload()) return;
+  setGuideView("sharepick");
+  document.body.classList.add("guide-open");
+  const body = document.getElementById("sharepick-body");
+  const head = '<div class="games-label">' + t("share.pickGroup") + '</div>';
+  body.innerHTML = head + '<div class="stat-line">' + t("auth.working") + '</div>';
+  try {
+    const g = await groupsApi();
+    const groups = await g.listGroups();
+    let html = head;
+    if (!groups.length) {
+      html += '<div class="stat-line">' + t("share.noGroups") + '</div>';
+    } else {
+      const st = await Promise.all(groups.map((gr) => g.sendStatus(gr.id)));
+      groups.forEach((gr, i) => {
+        const can = (st[i] || {}).can_send !== false;
+        const sub = can ? t("groups.membersN", { n: gr.members }) : t("share.freesIn", { t: fmtCountdown((st[i] || {}).active_expires) });
+        html += '<div class="game-row sharegroup' + (can ? '' : ' disabled') + '"' + (can ? ' data-send="' + gr.id + '" data-name="' + escHtml(gr.name) + '"' : '') +
+          '><div class="game-main"><div class="game-title">' + escHtml(gr.name) + '</div><div class="game-sub">' + sub + '</div></div></div>';
+      });
+    }
+    body.innerHTML = html;
+  } catch (e) { body.innerHTML = head + '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+}
+document.getElementById("sharepick-body").addEventListener("click", async (e) => {
+  const row = e.target.closest("[data-send]");
+  if (!row) return;
+  const gid = row.dataset.send, name = row.dataset.name, payload = buildSharePayload();
+  if (!payload) return;
+  row.classList.add("disabled");
+  try {
+    const cid = await (await import("./src/services/challenges.js")).createChallenge(payload);
+    const r = cid ? await (await groupsApi()).sendGame(gid, cid) : { ok: false };
+    if (r.ok) { closeGuide(); showToast(t("share.sent", { name })); }
+    else showToast(t("auth.offline"));
+  } catch (err) { showToast(t("auth.offline")); }
+});
+document.getElementById("share-as-link").addEventListener("click", () => { closeGuide(); sharePuzzle(); });
+
 winHomeBtn.addEventListener("click", goHome);
-winShareBtn.addEventListener("click", sharePuzzle);
+winShareBtn.addEventListener("click", () => { if (authSession) openSharePicker(); else sharePuzzle(); });
 
 /* ---------------- Pause menu + theme ---------------- */
 const menuEl = document.getElementById("menu");
