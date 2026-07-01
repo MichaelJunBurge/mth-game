@@ -171,9 +171,8 @@
   body.entering .timer,
   body.playing .timer,
   body.home-timer .timer { opacity: 1; }
-  /* Full-strength on the home screen (the 02:00 budget), fading to muted once
-     the clock actually starts. */
-  body.home-timer .timer { color: var(--ink); }
+  /* The home 02:00 budget uses the same muted colour as the running clock does
+     during play (no full-strength override) — hover still darkens it (below). */
   /* On home in timed mode the 02:00 sits where the hamburger would — so it
      doubles as the menu button (tap it, like the timer during play) and the
      hamburger hides to avoid overlapping it. */
@@ -1448,20 +1447,21 @@ function animateIntroWord(text) {
   clearIntroAnim();
   const spans = buildIntroLetters(text);
   const rnd = () => String.fromCharCode(97 + randInt(0, 25)); // lowercase a–z while spinning
-  // The page slide is ~0.22s; keep the letters running ~half a second AFTER it
-  // lands, then stop them left-to-right.
-  const START = 600;
+  // Letters begin locking almost as soon as the page lands (small START), then
+  // cascade left-to-right over a longer, more deliberate span (STEP) while cycling
+  // random letters at a slower flicker (SPIN_MS).
+  const START = 150, STEP = 180, SPIN_MS = 80;
   spans.forEach((s, i) => {
     s.classList.add("spinning");
     s.textContent = rnd();
-    const spin = setInterval(() => { s.textContent = rnd(); }, 45);
+    const spin = setInterval(() => { s.textContent = rnd(); }, SPIN_MS);
     introTimers.push(spin);
     introTimers.push(setTimeout(() => {            // stop + lock this letter (cascades left-to-right)
       clearInterval(spin);
       s.textContent = text[i];
       s.classList.remove("spinning");
       s.classList.add("lock");
-    }, START + i * 70));
+    }, START + i * STEP));
   });
 }
 function introWordText() {
