@@ -1187,7 +1187,6 @@
         </svg>
       </button>
       <button id="menu-submit" class="menu-btn">Quit</button>
-      <button id="menu-resume" class="menu-btn" data-i18n="menu.resume">Resume</button>
       <button id="menu-reset" class="menu-btn" data-i18n="menu.reset">Reset</button>
       <button id="menu-home" class="menu-btn" data-i18n="menu.home">Home</button>
       <button id="menu-auto" class="menu-btn">auto = (on)</button>
@@ -1483,10 +1482,6 @@ function animateIntroWord(text) {
 function introWordText() {
   return t(gameMode === "ranked" ? "mode.ranked" : gameMode === "practice" ? "mode.practice" : "mp.title");
 }
-// The intro word for a SHARED game (the sender's game type). Translated here at
-// module scope because playSharedData/playIntro shadow the translate `t` with the
-// target number. Multiplayer isn't shareable yet, so it's practice-or-ranked.
-function modeWordFor(practice) { return t(practice ? "mode.practice" : "mode.ranked"); }
 
 /* ---------------- Chevron arrows (identical up/down) ---------------- */
 function chevron(dir) {
@@ -3450,9 +3445,9 @@ function openMenu() {
   } else {
     sub.style.display = "none";
   }
-  // Shared games swap "Home" (which would lose the link) for Resume + Reset.
+  // Shared games swap "Home" (which would lose the link) for Reset (closing the
+  // menu resumes, so there's no separate Resume button).
   const shared = !!sharedGame;
-  document.getElementById("menu-resume").style.display = shared ? "" : "none";
   document.getElementById("menu-reset").style.display = shared ? "" : "none";
   document.getElementById("menu-home").style.display = shared ? "none" : "";
   document.body.classList.add("menu-open");
@@ -3481,7 +3476,7 @@ function restartShared() {
   if (!sharedGame) return;
   const sg = sharedGame, draws = introDraws.slice(), code = activeShareCode;
   if (draws.length === SLOT_COUNT) {
-    playIntro(sg.t, sg.n, draws, modeWordFor(!!sg.practice));   // backToHome inside clears shared state
+    playIntro(sg.t, sg.n, draws, false);   // replay from Reset — no help-sheet gate
   } else {
     backToHome();
     currentTarget = sg.t;
@@ -3557,7 +3552,6 @@ overlaySheetClose(menuEl, -1, () => closeMenu(true));                       // s
 overlaySheetClose(document.getElementById("guide"), 1, () => closeGuide()); // swipe down closes help
 document.getElementById("menu-profile").addEventListener("click", openGuide); // -> profile/help (openGuide closes the menu)
 document.getElementById("menu-submit").addEventListener("click", submitFromMenu);
-document.getElementById("menu-resume").addEventListener("click", () => closeMenu(true));
 document.getElementById("menu-reset").addEventListener("click", () => { closeMenu(false); restartShared(); });
 document.getElementById("menu-home").addEventListener("click", () => { closeMenu(false); goHome(); });
 submitEl.addEventListener("click", finishSubmitted);
@@ -4157,8 +4151,8 @@ function playSharedData(data, code) {
   const hasIntro = Array.isArray(data.intro) && data.intro.length === SLOT_COUNT &&
     data.intro.every((d) => d && typeof d.i === "number" && typeof d.t === "number");
   if (hasIntro) {
-    // Announce the game type first (the sender's mode), then replay the target roll.
-    playIntro(t, nums, data.intro, modeWordFor(!!data.pr)); // does backToHome, sets up + schedules the replay
+    // Open the target roll, then gate on the help/profile sheet before the numbers draw.
+    playIntro(t, nums, data.intro, true); // does backToHome, sets up + schedules the replay
     activeShareCode = code || null; // backToHome cleared it
     setShared();
     return true;
@@ -4274,7 +4268,10 @@ let pbSpinSlot = new Array(SLOT_COUNT).fill(false);
 function pbTick() {
   if (pbPausedElapsed !== null) return;
   const elapsed = Date.now() - pbStart;
-  for (const e of pbEvents) { if (!e.done && elapsed >= e.t) { e.done = true; try { e.fn(); } catch (_) {} } }
+  for (const e of pbEvents) {
+    if (pbPausedElapsed !== null) break;   // an event just paused us (e.g. the shared gate) — stop firing the rest
+    if (!e.done && elapsed >= e.t) { e.done = true; try { e.fn(); } catch (_) {} }
+  }
   for (let i = 0; i < 3; i++) if (pbSpinReel[i]) reels[i].textContent = randInt(0, 9);
   for (let i = 0; i < SLOT_COUNT; i++) if (pbSpinSlot[i]) slotParts(i).num.textContent = (pbNums[i] <= 10 ? randInt(1, 9) : randInt(10, 99));
   if (pbEvents.some((e) => !e.done)) pbTimer = setTimeout(pbTick, 45);
@@ -4297,11 +4294,11 @@ function pbStop() {
   pbSpinSlot = new Array(SLOT_COUNT).fill(false);
 }
 
-function playIntro(t, nums, draws, modeWord) {
+function playIntro(t, nums, draws, gate) {
   backToHome();                       // clean slate (clears replay/intro)
   replaying = true;
   document.body.classList.add("replay");
-  document.body.classList.remove("home-timer"); // caller sets the time-to-beat text
+  document.body.classList.remove("home-timer", "mode-intro-on"); // never the home intro word during a replay
   currentTarget = t;
   introDraws = draws.slice();         // keep so a re-share replays too
   pbNums = nums.slice();
@@ -4315,40 +4312,27 @@ function playIntro(t, nums, draws, modeWord) {
   pbSpinSlot = new Array(SLOT_COUNT).fill(false);
 
   const ev = [];
-  // Shared games announce the game type first: the mode word cycles in, holds, then
-  // fades away — exactly like the home intro — and only then does the target roll
-  // begin beneath it. `base` offsets the whole roll timeline by the word phase.
-  let base = 0;
-  if (modeWord) {
-    const WORD_HOLD = 1150, WORD_FADE = 360;
-    ev.push({ t: 0, fn: () => {
-      const intro = document.getElementById("mode-intro");
-      intro.classList.remove("revealed", "leaving");
-      document.body.classList.add("mode-intro-on");   // hides target/slots/calc behind the word
-      animateIntroWord(modeWord);                      // slot-machine letters, like the home pages
-    } });
-    ev.push({ t: WORD_HOLD, fn: () => { document.getElementById("mode-intro").classList.add("leaving"); } });
-    ev.push({ t: WORD_HOLD + WORD_FADE, fn: () => {
-      clearIntroAnim();
-      document.body.classList.remove("mode-intro-on"); // reveal the reels for the roll
-      document.getElementById("mode-intro").classList.remove("leaving");
-    } });
-    base = WORD_HOLD + WORD_FADE;
-  }
   // target roll (same stagger as rollTarget)
-  ev.push({ t: base + 0, fn: () => { pbSpinReel = [true, true, true]; reels.forEach((r) => r.classList.add("spinning")); } });
-  [650, 1050, 1450].forEach((st, idx) => ev.push({ t: base + st, fn: () => {
+  ev.push({ t: 0, fn: () => { pbSpinReel = [true, true, true]; reels.forEach((r) => r.classList.add("spinning")); } });
+  [650, 1050, 1450].forEach((st, idx) => ev.push({ t: st, fn: () => {
     pbSpinReel[idx] = false;
     reels[idx].textContent = pbTargetDigits[idx];
     reels[idx].classList.remove("spinning"); reels[idx].classList.add("lock");
   } }));
+  // A shared link opens the help/profile sheet (log in / how to play) as soon as the
+  // target has rolled but BEFORE the numbers draw, and PAUSES there; closing the sheet
+  // resumes the draws. So the recipient can sign in or read the rules first, then start.
+  if (gate) {
+    const firstDraw = draws.length ? Math.min(...draws.map((d) => d.t)) : 1600;
+    ev.push({ t: Math.max(1451, firstDraw - 1), fn: () => { openGuide(); } });
+  }
   // number draws at their recorded times
   let maxEnd = 1450;
   draws.forEach((d) => {
-    ev.push({ t: base + d.t, fn: () => { pbSpinSlot[d.i] = true; slotParts(d.i).num.classList.add("spinning"); } });
+    ev.push({ t: d.t, fn: () => { pbSpinSlot[d.i] = true; slotParts(d.i).num.classList.add("spinning"); } });
     const end = d.t + 420;
     maxEnd = Math.max(maxEnd, end);
-    ev.push({ t: base + end, fn: () => {
+    ev.push({ t: end, fn: () => {
       pbSpinSlot[d.i] = false;
       const num = slotParts(d.i).num;
       num.textContent = pbNums[d.i]; num.classList.remove("spinning"); num.classList.add("filled", "lock");
@@ -4356,18 +4340,18 @@ function playIntro(t, nums, draws, modeWord) {
     } });
   });
   // reveal the "Beat X" banner as soon as the last number lands
-  ev.push({ t: base + maxEnd, fn: () => { document.body.classList.add("beat-on"); } });
+  ev.push({ t: maxEnd, fn: () => { document.body.classList.add("beat-on"); } });
   // entrance (same beats as beginEntrance, but on the pausable clock)
   const HOLD = 2000, RISE = 800, FADE = 500, beat = maxEnd + 450;
-  ev.push({ t: base + beat, fn: () => {
+  ev.push({ t: beat, fn: () => {
     initPages(); layoutBorder(); resetBorder();
     timerEl.textContent = isTimedGame() ? fmtTime(TIMED_SEC) : "00:00";
     document.body.classList.remove("time-up"); document.body.classList.add("entering");
     positionBeat();
   } });
-  ev.push({ t: base + beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); trackBeatFor(RISE + 120); } });
-  ev.push({ t: base + beat + HOLD + RISE, fn: () => { document.body.classList.add("playing"); calcEl.style.maxHeight = "80vh"; positionBeat(); } });
-  ev.push({ t: base + beat + HOLD + RISE + FADE, fn: () => {
+  ev.push({ t: beat + HOLD, fn: () => { document.body.classList.add("raised"); raiseCalc(); collapseArrows(); trackBeatFor(RISE + 120); } });
+  ev.push({ t: beat + HOLD + RISE, fn: () => { document.body.classList.add("playing"); calcEl.style.maxHeight = "80vh"; positionBeat(); } });
+  ev.push({ t: beat + HOLD + RISE + FADE, fn: () => {
     startTimer(); startBorder(0); positionPageDel(); positionBeat();
     replaying = false; document.body.classList.remove("replay");
     saveState();
