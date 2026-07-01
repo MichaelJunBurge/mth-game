@@ -888,9 +888,30 @@
   #guide[data-view="account"] .guide-account-view,
   #guide[data-view="stats"] .guide-stats-view,
   #guide[data-view="friends"] .guide-friends-view,
+  #guide[data-view="games"] .guide-games-view,
   #guide[data-view="rules"] .guide-rules-view,
   #guide[data-view="overview"] .guide-overview-view { display: flex; }
-  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  #guide:not([data-view="auth"]):not([data-view="username"]):not([data-view="account"]):not([data-view="stats"]):not([data-view="friends"]):not([data-view="games"]):not([data-view="rules"]):not([data-view="overview"]) .guide-choice { display: flex; }
+  /* Active games list. */
+  .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
+  .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
+  .game-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; padding: 0.4em 0; cursor: pointer; }
+  .game-main { display: flex; flex-direction: column; gap: 0.15em; min-width: 0; }
+  .game-title { font-size: calc(var(--size-ui) * 0.92); color: var(--ink); }
+  .game-sub { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); }
+  .game-right { display: flex; align-items: center; gap: 0.5em; flex-shrink: 0; font-size: calc(var(--size-ui) * 0.78); color: var(--muted); }
+  .game-beat { color: var(--red); font-weight: 700; }
+  .game-attempts { display: none; flex-direction: column; gap: 0.2em; padding: 0.2em 0 0.5em 0.8em; }
+  .game-row.open + .game-attempts { display: flex; }
+  .attempt-row { display: flex; justify-content: space-between; gap: 0.5em; font-size: calc(var(--size-ui) * 0.78); }
+  .attempt-row .who { color: var(--ink); }
+  .attempt-row .res { color: var(--muted); }
+  .attempt-row .res.beat { color: var(--red); font-weight: 700; }
+  /* Unseen "someone beat you" dot on the profile glyph + account button. */
+  #nav-help { position: relative; }
+  .beat-dot { display: none; }
+  body.has-beat #nav-help .beat-dot { display: block; position: absolute; top: 0.1em; right: 0.1em; width: 0.42em; height: 0.42em; border-radius: 50%; background: var(--red); }
+  body.has-beat #account-games::after { content: " ●"; color: var(--red); font-size: 0.7em; vertical-align: middle; }
   /* Friends: search + relationship rows. */
   .friends-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(80vw, 330px); max-height: 54vh; overflow-y: auto; }
   .friends-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
@@ -1046,6 +1067,7 @@
         <path vector-effect="non-scaling-stroke" d="M5.5 19c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5" />
       </g>
     </svg>
+    <span class="beat-dot" aria-hidden="true"></span>
   </button>
 
   <!-- Sketchpad page (leftmost): a blank, gridded drawing surface. -->
@@ -1157,9 +1179,15 @@
     <!-- Signed-in account (challenges come later). -->
     <div class="menu-view guide-account-view">
       <div class="help-text" id="account-msg"></div>
+      <button id="account-games" class="menu-btn" data-i18n="games.title">active games</button>
       <button id="account-stats" class="menu-btn" data-i18n="stats.title">stats</button>
       <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
+      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
+    </div>
+    <!-- Active games: challenges I sent (with attempts) + ones I've played. -->
+    <div class="menu-view guide-games-view">
+      <div id="games-body" class="games-body"></div>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <!-- Ranked stats, rendered from game_results. -->
@@ -1266,6 +1294,7 @@ let lastOutcome = null;    // this player's result for the just-finished game
 let sharedGame = null;     // when set, we're playing a puzzle someone sent us
 let borderDurationSec = TIMED_SEC; // how long the green bar takes to go around
 let activeShareCode = null;  // the ?g= code this game came from (for refresh restore)
+let activeChallengeId = null;  // the ?c= challenge id being attempted (for recording the attempt)
 // Home carousel pages, in left-to-right order. App opens on "practice"; "ranked"
 // is its right neighbour, "multiplayer" its left. The carousel loops both ways.
 // "ranked" is the timed (2:00) mode whose results feed the leaderboard.
@@ -2656,6 +2685,7 @@ function backToHome() {
   sharedGame = null;
   borderDurationSec = TIMED_SEC;
   activeShareCode = null;
+  activeChallengeId = null;
   beatEl.classList.remove("show");
   renderHistory();
   renderGenerated();
@@ -2784,7 +2814,8 @@ function endGame() {
   document.body.classList.add("won");
   saveState();
   if (celebrate) launchConfetti();
-  if (!sharedGame) recordGameResult(me, !practiceGame); // own game: count it; ranked also stores details
+  if (!sharedGame) recordGameResult(me, !practiceGame);        // own game: count it; ranked also stores details
+  else if (activeChallengeId) recordChallengeAttempt(me);      // someone's challenge: record the attempt
 }
 
 // Persist a finished own game (fire-and-forget; silent when signed out / offline).
@@ -2796,6 +2827,18 @@ async function recordGameResult(outcome, ranked) {
       timeSec: outcome.timeSec, target: currentTarget, goal: goalOf(outcome), score: outcome.score,
     });
   } catch (e) { /* signed out / offline — nothing to record */ }
+}
+
+// Record my attempt at a challenge (with my working, so the creator can view it).
+async function recordChallengeAttempt(outcome) {
+  const cid = activeChallengeId;
+  try {
+    const c = await import("./src/services/challenges.js");
+    await c.recordAttempt(cid, {
+      solved: outcome.solved, score: outcome.score, distance: outcome.distance,
+      goal: goalOf(outcome), timeSec: outcome.timeSec, working: history.slice(),
+    });
+  } catch (e) { /* signed out / offline */ }
 }
 
 /* ---------------- Confetti (win / beat) ---------------- */
@@ -3031,7 +3074,7 @@ function showToast(msg) {
 
 // (encodeGame / decodeGame / parseShareParams live in services/share.js)
 
-function sharePuzzle() {
+async function sharePuzzle() {
   if (currentTarget === null || !lastOutcome) return;
   const payload = {
     t: currentTarget,
@@ -3049,21 +3092,22 @@ function sharePuzzle() {
     },
   };
   const url = new URL(location.href);
-  url.search = "?g=" + encodeGame(payload);
-  const link = url.toString();
+  let link, tracked = false;
+  if (authSession) { // signed in -> a tracked challenge (?c=<id>) so attempts show up
+    try {
+      const id = await (await import("./src/services/challenges.js")).createChallenge(payload);
+      if (id) { url.search = "?c=" + id; link = url.toString(); tracked = true; }
+    } catch (e) { /* offline -> fall back to an encoded link */ }
+  }
+  if (!link) { url.search = "?g=" + encodeGame(payload); link = url.toString(); }
   const blurb = lastOutcome.solved
     ? t("share.time", { t: fmtTime(lastOutcome.timeSec) })
     : t("share.score", { s: lastOutcome.score });
-  if (navigator.share) {
-    navigator.share({ title: "mth game", text: blurb, url: link }).catch(() => {});
-  } else if (navigator.clipboard) {
-    navigator.clipboard.writeText(link).then(
-      () => showToast(t("toast.copied")),
-      () => showToast(link)
-    );
-  } else {
-    showToast(link);
-  }
+  // Anonymous shares use the native sheet; tracked shares copy (we awaited, which
+  // can block the native share sheet).
+  if (!tracked && navigator.share) { navigator.share({ title: "mth game", text: blurb, url: link }).catch(() => {}); return; }
+  if (navigator.clipboard) navigator.clipboard.writeText(link).then(() => showToast(t("toast.copied")), () => showToast(link));
+  else showToast(link);
 }
 
 winHomeBtn.addEventListener("click", goHome);
@@ -3534,13 +3578,72 @@ document.getElementById("friends-body").addEventListener("click", async (e) => {
     renderFriends(q.trim() ? await api.searchUsers(q) : null);
   } catch (err) { btn.disabled = false; }
 });
+// ---- Active games (challenges) ----
+document.getElementById("account-games").addEventListener("click", openGames);
+const GAMES_SEEN_KEY = "numbersRound.gamesSeen.v2";
+function gOut(o) { return { distance: Number(o.distance) || 0, timeSec: Number(o.timeSec != null ? o.timeSec : o.time_sec) || 0, solved: !!o.solved }; }
+function gRes(o) { return o.solved ? t("games.solvedIn", { t: fmtTime(Math.round(o.timeSec)) }) : t("games.off", { d: o.distance }); }
+async function openGames() {
+  setGuideView("games");
+  storage.set(GAMES_SEEN_KEY, String(Date.now())); // opening the tab clears the beat dot
+  document.body.classList.remove("has-beat");
+  const body = document.getElementById("games-body");
+  body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
+  try {
+    const c = await import("./src/services/challenges.js");
+    const [sent, played] = await Promise.all([c.listSent(), c.listPlayed()]);
+    renderGames(sent, played);
+  } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+}
+function renderGames(sent, played) {
+  const body = document.getElementById("games-body");
+  let html = '<div class="games-label">' + t("games.sent") + '</div>';
+  if (!sent.length) html += '<div class="stat-line">' + t("games.noneSent") + '</div>';
+  sent.forEach((c) => {
+    const mine = gOut(c.payload.o);
+    const beaten = c.attempts.some((a) => verdict(gOut(a), mine) === "win");
+    const right = beaten ? '<span class="game-beat">' + t("games.beaten") + '</span>' : t("games.attemptsN", { n: c.attempts.length });
+    html += '<div class="game-row"><div class="game-main"><div class="game-title">' + t("games.target", { n: c.payload.t }) + ' · ' + gRes(mine) + '</div><div class="game-sub">' + t("games.attemptsN", { n: c.attempts.length }) + '</div></div><div class="game-right">' + right + '</div></div>';
+    html += '<div class="game-attempts">';
+    c.attempts.forEach((a) => {
+      const ao = gOut(a), beat = verdict(ao, mine) === "win";
+      html += '<div class="attempt-row"><span class="who">' + escHtml(a.username || "?") + '</span><span class="res' + (beat ? " beat" : "") + '">' + gRes(ao) + '</span></div>';
+    });
+    html += '</div>';
+  });
+  html += '<div class="games-label">' + t("games.played") + '</div>';
+  if (!played.length) html += '<div class="stat-line">' + t("games.nonePlayed") + '</div>';
+  played.forEach((p) => {
+    const mine = gOut(p.attempt), theirs = gOut(p.challenge.payload.o);
+    const v = verdict(mine, theirs);
+    const tag = '<span class="' + (v === "win" ? "game-beat" : "") + '">' + (v === "win" ? t("games.youWon") : v === "lose" ? t("games.youLost") : t("games.tie")) + '</span>';
+    html += '<div class="game-row"><div class="game-main"><div class="game-title">' + escHtml(p.challenge.creator_username || "?") + ' · ' + t("games.target", { n: p.challenge.payload.t }) + '</div><div class="game-sub">' + gRes(mine) + '</div></div><div class="game-right">' + tag + '</div></div>';
+  });
+  body.innerHTML = html;
+}
+// Expand a sent challenge to reveal its attempts.
+document.getElementById("games-body").addEventListener("click", (e) => {
+  const row = e.target.closest(".game-row");
+  if (row && row.nextElementSibling && row.nextElementSibling.classList.contains("game-attempts")) row.classList.toggle("open");
+});
+// Show the "someone beat you" dot when a sent challenge has a beating attempt since last seen.
+async function checkBeatBadge() {
+  if (!authSession) { document.body.classList.remove("has-beat"); return; }
+  try {
+    const sent = await (await import("./src/services/challenges.js")).listSent();
+    const seen = Number(storage.get(GAMES_SEEN_KEY) || 0);
+    const beaten = sent.some((c) => { const mine = gOut(c.payload.o); return c.attempts.some((a) => new Date(a.created_at).getTime() > seen && verdict(gOut(a), mine) === "win"); });
+    document.body.classList.toggle("has-beat", beaten);
+  } catch (e) { /* offline */ }
+}
 applyAuthState(null, null); // default: signed out
 (async () => {           // restore the session on load + track changes
   try {
     const a = await authApi();
     const s = await a.getSession();
     applyAuthState(s, s ? await a.getUsername() : null);
-    a.onAuth(async (session) => { applyAuthState(session, session ? await a.getUsername() : null); });
+    checkBeatBadge();
+    a.onAuth(async (session) => { applyAuthState(session, session ? await a.getUsername() : null); checkBeatBadge(); });
   } catch (e) { /* offline / CDN down — game still works, no account UI */ }
 })();
 
@@ -3668,7 +3771,11 @@ function loadFromURL() {
   const { data, code } = parseShareParams(location.search);
   if (code) activeShareCode = code; // remember the ?g= code for refresh-restore
   if (!data) return false;
+  return playSharedData(data, code);
+}
 
+// Open a shared puzzle payload (from a ?g= decode or a fetched ?c= challenge).
+function playSharedData(data, code) {
   const t = parseInt(data.t, 10);
   const nums = (data.n || []).map(Number);
   if (isNaN(t) || nums.length !== SLOT_COUNT || nums.some(isNaN)) return false;
@@ -3726,6 +3833,19 @@ function loadFromURL() {
   setShared();
   startPlaying();
   return true;
+}
+
+// A tracked challenge link (?c=<id>): fetch the puzzle, then play it like a share.
+// activeChallengeId is set AFTER playSharedData (playIntro's backToHome clears it),
+// so the attempt gets recorded on finish.
+async function loadChallenge(id) {
+  try {
+    const c = await (await import("./src/services/challenges.js")).getChallenge(id);
+    if (!c || !c.payload) { goHome(); return false; }
+    const ok = playSharedData(c.payload, null);
+    if (ok) activeChallengeId = id;
+    return ok;
+  } catch (e) { goHome(); return false; }
 }
 
 /* Pressing the target while playing returns to the home screen showing 000,
@@ -3965,7 +4085,10 @@ refreshHomeTimer(); // show 02:00 on the home screen in timed mode
 // On load: restore an in-progress game unless the URL points at a *different*
 // shared puzzle (a fresh challenge link). Otherwise open whatever the URL has.
 (function init() {
-  const urlG = new URLSearchParams(location.search).get("g");
+  const params = new URLSearchParams(location.search);
+  const urlC = params.get("c");
+  if (urlC) { clearSave(); loadChallenge(urlC); return; } // tracked challenge — always fresh
+  const urlG = params.get("g");
   const saved = readSave();
   if (saved && (!urlG || urlG === saved.shareCode)) {
     if (restoreState(saved)) return;
