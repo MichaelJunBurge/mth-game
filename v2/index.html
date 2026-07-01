@@ -2991,6 +2991,9 @@ function endGame() {
   }
 
   document.body.classList.add("won");
+  // Only practice games are shareable now (ranked feeds the global ranking, so it
+  // isn't shared). A received shared puzzle can still be passed on.
+  winShareBtn.style.display = (practiceGame || sharedGame) ? "" : "none";
   saveState();
   if (celebrate) launchConfetti();
   if (!sharedGame) recordGameResult(me, !practiceGame);        // own game: count it; ranked also stores details
