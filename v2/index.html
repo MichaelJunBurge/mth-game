@@ -3391,7 +3391,7 @@ document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("clic
 document.getElementById("guide-walk").addEventListener("click", () => { closeGuide(); startTour(); });
 // Tap the empty area of either overlay (not a button/control) to close it.
 menuEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, #menu-scale, button, input")) closeMenu(true); });
-guideEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, button, input, .auth-msg, .help-text")) closeGuide(); });
+guideEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, button, input, .auth-msg, .help-text, .games-body, .friends-body, .stats-body")) closeGuide(); });
 
 /* ---------------- Account / profile (Supabase, lazy-loaded) ----------------
    Loaded on demand so a CDN/network hiccup can never break the game itself. */
