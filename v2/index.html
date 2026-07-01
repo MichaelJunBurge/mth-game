@@ -892,7 +892,7 @@
   }
   /* Submit goes green once all six numbers are used (a "you can stop" cue). */
   .menu-btn.ready { color: var(--green); }
-  .guide-back { color: var(--red); } /* the Back text buttons in the help views */
+  .guide-back, .guide-back-inner, .back-btn { color: var(--red); } /* all Back buttons are red */
   /* End game: red, pinned to the bottom of the menu; turns green once every
      number is used (then it's a real Submit). */
   #menu-submit {
@@ -1209,23 +1209,27 @@
       <button id="menu-lang" class="menu-btn">language (english)</button>
       <div id="menu-scale-wrap" class="menu-scale-wrap">
         <div id="menu-scale-label" class="menu-scale-label">size (100%)</div>
-        <input id="menu-scale" class="menu-slider" type="range" min="0.6" max="1" step="0.1" value="1" aria-label="Size" />
+        <input id="menu-scale" class="menu-slider" type="range" min="0.5" max="1" step="0.1" value="0.5" aria-label="Size" />
       </div>
     </div>
   </div>
 
   <!-- Help (question-mark) overlay: Profile / Overview / Rules / Walkthrough. -->
   <div id="guide" class="sheet">
+    <!-- Logged out: the classic choice (sign in + help). Signed in the sheet opens
+         to the account and help lives behind the "?" (guide-help-view). -->
     <div class="menu-view guide-choice">
       <button id="guide-profile" class="menu-btn">profile</button>
-      <button id="guide-help" class="menu-btn guide-qmark" aria-label="help">?</button>
+      <button class="menu-btn" data-help="overview" data-i18n="guide.overview">How to play</button>
+      <button class="menu-btn" data-help="rules" data-i18n="guide.rules">Rules</button>
+      <button class="menu-btn" data-help="walk" data-i18n="guide.walk">Walkthrough</button>
     </div>
-    <!-- Help folder: how to play / rules / walkthrough (behind the "?"). -->
+    <!-- Help folder (the "?" from the account view). -->
     <div class="menu-view guide-help-view">
-      <button id="guide-overview" class="menu-btn" data-i18n="guide.overview">How to play</button>
-      <button id="guide-rules" class="menu-btn" data-i18n="guide.rules">Rules</button>
-      <button id="guide-walk" class="menu-btn" data-i18n="guide.walk">Walkthrough</button>
-      <button id="guide-help-back" class="menu-btn" data-i18n="menu.back">Back</button>
+      <button class="menu-btn" data-help="overview" data-i18n="guide.overview">How to play</button>
+      <button class="menu-btn" data-help="rules" data-i18n="guide.rules">Rules</button>
+      <button class="menu-btn" data-help="walk" data-i18n="guide.walk">Walkthrough</button>
+      <button id="guide-help-back" class="menu-btn back-btn" data-i18n="menu.back">Back</button>
     </div>
     <!-- Sign in / sign up (one action). -->
     <div class="menu-view guide-auth-view">
@@ -1254,7 +1258,6 @@
       <button id="account-friends" class="menu-btn" data-i18n="friends.title">friends</button>
       <button id="account-help" class="menu-btn guide-qmark" aria-label="help">?</button>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
-      <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
     <!-- Global ranked leaderboard. -->
     <div class="menu-view guide-leaderboard-view">
@@ -3482,7 +3485,7 @@ function toggleTheme() {
 // Spacing stays put (timer/dots are dvh-based) and the column stays centred; the
 // JS-positioned bits (page-x, submit, beat, ring, sketch) re-measure after.
 function applyScale(v) {
-  const s = Math.max(0.6, Math.min(1, Number(v) || 1));
+  const s = Math.max(0.5, Math.min(1, Number(v) || 0.5));
   document.documentElement.style.setProperty("--scale", String(s));
   const slider = document.getElementById("menu-scale");
   if (slider) slider.value = String(s);
@@ -3695,14 +3698,18 @@ function closeGuide() {
   resumeFromOverlay();
 }
 document.getElementById("guide-profile").addEventListener("click", () => openAccount());
-document.getElementById("guide-rules").addEventListener("click", () => setGuideView("rules"));
-document.getElementById("guide-overview").addEventListener("click", () => setGuideView("overview"));
 document.querySelectorAll(".guide-back").forEach((b) => b.addEventListener("click", () => setGuideView("choice")));
-document.getElementById("guide-walk").addEventListener("click", beginWalkthrough);
-// The "?" folder: how to play / rules / walkthrough. Its Back returns to wherever
-// makes sense — the account view when signed in, else the choice screen.
-document.getElementById("guide-help").addEventListener("click", () => setGuideView("help"));
+// How to play / rules / walkthrough — shared buttons on the choice screen and in
+// the "?" folder (data-help, so they can appear in both without duplicate ids).
+guideEl.addEventListener("click", (e) => {
+  const h = e.target.closest("[data-help]");
+  if (!h) return;
+  if (h.dataset.help === "overview") setGuideView("overview");
+  else if (h.dataset.help === "rules") setGuideView("rules");
+  else beginWalkthrough();
+});
 document.getElementById("account-help").addEventListener("click", () => setGuideView("help"));
+// The "?" folder's Back returns to the account (signed in) or the choice screen.
 document.getElementById("guide-help-back").addEventListener("click", () => { if (authSession) openAccount(); else setGuideView("choice"); });
 // Tap the empty area of either overlay (not a button/control) to close it.
 menuEl.addEventListener("click", (e) => { if (!e.target.closest(".menu-btn, #menu-scale-wrap, button, input")) closeMenu(true); });
@@ -4676,7 +4683,7 @@ sizeSketch();
 setLang(storage.get(LANG_KEY) === "ko" ? "ko" : "en");
 gameMode = "practice"; // always open on practice so ranked games are never started by accident
 applyTheme(storage.get(THEME_KEY) || "light");
-applyScale(storage.get(SCALE_KEY) || 1);
+applyScale(storage.get(SCALE_KEY) || 0.5); // default size 50%
 applyAutoEqual((storage.get(AUTOEQ_KEY) || "on") !== "off");
 applyAutoSign(storage.get(AUTOSIGN_KEY) || "x");
 applyLang();
