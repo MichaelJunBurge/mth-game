@@ -4135,13 +4135,16 @@ applyAuthState(null, null); // default: signed out
 
 // The walkthrough drives a quick demo and points a spotlight + note at each part.
 const TOUR_STEPS = [
-  { setup: () => { tourShowIntro(); }, el: () => document.getElementById("mode-intro") }, // modes / carousel nav
-  { setup: () => { tourSetTarget(); }, el: () => targetEl },        // target (game revealed)
-  { setup: () => { tourFillNumbers(); }, el: () => slotsEl },       // the six numbers
-  { setup: () => { tourDemoCalc(); }, el: () => historyWrapEl },    // build a calc + the tape
-  { setup: () => {}, el: () => dotsEl },                            // pages + sketchpad
-  { setup: () => {}, el: () => timerEl },                           // menu / help+profile swipes
-  { setup: () => {}, el: () => null },                             // submit + scoring + modes recap
+  { setup: () => { tourShowIntro(); }, el: () => null },                                    // 0 navigation (swipe/tap)
+  { setup: () => { tourShowIntro(); }, el: () => document.getElementById("mode-intro") },   // 1 the three modes
+  { setup: () => { tourShowIntro(); }, el: () => document.getElementById("mode-intro") },   // 2 open a mode
+  { setup: () => { tourSetTarget(); }, el: () => targetEl },                                 // 3 target
+  { setup: () => { tourFillNumbers(); }, el: () => slotsEl },                                // 4 the six numbers
+  { setup: () => { tourDemoCalc(); }, el: () => keysEl },                                    // 5 build a calculation
+  { setup: () => {}, el: () => historyWrapEl },                                              // 6 the tape / c / =
+  { setup: () => {}, el: () => dotsEl },                                                     // 7 pages + sketchpad
+  { setup: () => {}, el: () => timerEl },                                                    // 8 menu / help+profile
+  { setup: () => {}, el: () => null },                                                       // 9 submit + scoring + ready
 ];
 let tourIndex = 0;
 // Step 0: the home carousel with the Practice intro word up (nav lesson).
