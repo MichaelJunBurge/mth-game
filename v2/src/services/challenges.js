@@ -56,6 +56,18 @@ export async function listSent() {
   return challs.map((c) => ({ ...c, attempts: byChall.get(c.id) || [] }));
 }
 
+// ---- Direct sends (share to a person; needs share-to-individuals.sql) ----
+// Send a challenge I created to a user. Returns { ok, error }.
+export async function sendToUser(cid, uid) {
+  const { error } = await supabase.rpc("send_challenge_to", { p_cid: cid, p_uid: uid });
+  return { ok: !error, error: error ? error.message : null };
+}
+// Challenges sent directly to me (sender, target, played?, their result).
+export async function listReceived() {
+  const { data, error } = await supabase.rpc("my_received_challenges");
+  return error ? [] : (data || []);
+}
+
 // Challenges others made that I've attempted (my attempt + the challenge/creator).
 export async function listPlayed() {
   const s = await getSession();

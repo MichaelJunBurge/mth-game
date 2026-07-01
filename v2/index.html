@@ -1294,6 +1294,8 @@
     <!-- Share picker (logged in): send this game to one of your groups, or a link. -->
     <div class="menu-view guide-sharepick-view">
       <div id="sharepick-body" class="games-body"></div>
+      <input id="sharepick-search" class="auth-input" type="text" autocomplete="off" data-i18n-ph="share.toFriend" placeholder="send to a friend" />
+      <div id="sharepick-people" class="games-body"></div>
       <button id="share-as-link" class="menu-btn" data-i18n="share.asLink">share a link</button>
       <button class="menu-btn guide-back" data-i18n="menu.back">Back</button>
     </div>
@@ -3393,7 +3395,47 @@ async function openSharePicker() {
     }
     body.innerHTML = html;
   } catch (e) { body.innerHTML = head + '<div class="stat-line">' + t("auth.offline") + '</div>'; }
+  document.getElementById("sharepick-search").value = "";
+  renderSharePeople(null); // "send to a friend": default to my friends; search finds anyone
 }
+// Sendable people list in the share picker (my friends, or search results).
+async function renderSharePeople(results) {
+  const el = document.getElementById("sharepick-people");
+  try {
+    let people;
+    if (results) people = results.map((u) => ({ id: u.id, username: u.username }));
+    else {
+      const fr = await (await friendsApi()).listFriendships();
+      people = fr.filter((f) => f.status === "accepted").map((f) => ({ id: f.other_id, username: f.username }));
+    }
+    el.innerHTML = people.map((p) => friendRow(p.username, '<button class="friend-act" data-sendfriend="' + p.id + '" data-name="' + escHtml(p.username) + '">' + t("share.send") + '</button>')).join("");
+  } catch (e) { el.innerHTML = ""; }
+}
+async function sendChallengeToUser(uid, name) {
+  const payload = buildSharePayload();
+  if (!payload) return;
+  try {
+    const ch = await import("./src/services/challenges.js");
+    const cid = await ch.createChallenge(payload);
+    const r = cid ? await ch.sendToUser(cid, uid) : { ok: false };
+    if (r.ok) { closeGuide(); showToast(t("share.sent", { name })); } else showToast(t("auth.offline"));
+  } catch (e) { showToast(t("auth.offline")); }
+}
+let sharepickSearchTimer = null;
+document.getElementById("sharepick-search").addEventListener("input", (e) => {
+  const q = e.target.value;
+  clearTimeout(sharepickSearchTimer);
+  sharepickSearchTimer = setTimeout(async () => {
+    if (!q.trim()) { renderSharePeople(null); return; }
+    try { renderSharePeople(await (await friendsApi()).searchUsers(q)); } catch (err) {}
+  }, 280);
+});
+document.getElementById("sharepick-people").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-sendfriend]");
+  if (!btn) return;
+  btn.disabled = true;
+  sendChallengeToUser(btn.dataset.sendfriend, btn.dataset.name);
+});
 document.getElementById("sharepick-body").addEventListener("click", async (e) => {
   const row = e.target.closest("[data-send]");
   if (!row) return;
@@ -3962,13 +4004,22 @@ async function openGames() {
   body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
   try {
     const c = await import("./src/services/challenges.js");
-    const [sent, played] = await Promise.all([c.listSent(), c.listPlayed()]);
-    renderGames(sent, played);
+    const [sent, played, received] = await Promise.all([c.listSent(), c.listPlayed(), c.listReceived()]);
+    renderGames(sent, played, received);
   } catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; }
 }
-function renderGames(sent, played) {
+function renderGames(sent, played, received) {
   const body = document.getElementById("games-body");
-  let html = '<div class="games-label">' + t("games.sent") + '</div>';
+  let html = "";
+  // Puzzles sent directly to me that I haven't played -> Play.
+  const toPlay = (received || []).filter((r) => !r.i_played);
+  if (toPlay.length) {
+    html += '<div class="games-label">' + t("groups.toPlay") + '</div>';
+    toPlay.forEach((r) => {
+      html += '<div class="game-row"><div class="game-main"><div class="game-title">' + t("games.target", { n: r.target }) + '</div><div class="game-sub">' + t("groups.fromN", { u: escHtml(r.sender || "?") }) + '</div></div><div class="game-right"><button class="friend-act" data-playchallenge="' + r.cid + '">' + t("groups.play") + '</button></div></div>';
+    });
+  }
+  html += '<div class="games-label">' + t("games.sent") + '</div>';
   if (!sent.length) html += '<div class="stat-line">' + t("games.noneSent") + '</div>';
   sent.forEach((c) => {
     const mine = gOut(c.payload.o);
@@ -3994,6 +4045,8 @@ function renderGames(sent, played) {
 }
 // Expand a sent challenge to reveal its attempts.
 document.getElementById("games-body").addEventListener("click", (e) => {
+  const play = e.target.closest("[data-playchallenge]");
+  if (play) { closeGuide(); loadChallenge(play.dataset.playchallenge, false); return; } // play a puzzle sent to me
   const row = e.target.closest(".game-row");
   if (row && row.nextElementSibling && row.nextElementSibling.classList.contains("game-attempts")) row.classList.toggle("open");
 });
