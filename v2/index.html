@@ -2564,48 +2564,43 @@ stageEl.addEventListener("click", (e) => {
     commitModeSwipe(e.clientX > window.innerWidth / 2); // tap right -> right neighbour enters from the right (like the game pages)
   }
 });
-// Desktop trackpad: two-finger swipes behave like mobile swipes. HORIZONTAL =
-// page/mode nav, VERTICAL = open/close the sheets (up = help/profile, down = menu).
-// The timer is refreshed on EVERY event of a gesture (before the guards) so one
-// gesture — including its inertia tail — commits exactly once. deltaX/Y are the
-// inverse of finger movement, so finger = -delta.
-let wheelX = 0, wheelXTimer = null, wheelXLock = false;
-stageEl.addEventListener("wheel", (e) => {
-  if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;   // vertical — the window handler owns it
-  e.preventDefault();
-  clearTimeout(wheelXTimer);
-  wheelXTimer = setTimeout(() => { wheelX = 0; wheelXLock = false; }, 300); // gesture ends after a quiet gap
-  if (wheelXLock) return;                                  // already navigated this gesture (incl. inertia)
-  if (animating || tourOrOverlayOpen()) return;
-  wheelX += e.deltaX;
-  if (Math.abs(wheelX) < 40) return;
-  const dx = -wheelX;
-  wheelXLock = true; wheelX = 0;
-  if (document.body.classList.contains("playing")) commitSwipe(dx > 0 ? 1 : -1);
-  else if (canHomeModeSwipe()) commitModeSwipe(dx < 0);
-}, { passive: false });
-
-let wheelY = 0, wheelYTimer = null, wheelYLock = false;
+// Desktop trackpad: two-finger swipes mirror mobile swipes. One window-level
+// handler (so it also works while a sheet covers the screen) with a per-gesture
+// AXIS LOCK — the accumulated direction picks horizontal (page/mode nav) vs
+// vertical (open/close sheets) and stays that way for the gesture, so mixed
+// deltas don't flip. The gesture timer refreshes on EVERY event, so one gesture
+// (incl. its momentum tail) commits exactly one action. No `animating` guard, so
+// swipes work mid-animation too. deltaX/Y are the inverse of finger movement.
+let gDX = 0, gDY = 0, gWheelTimer = null, gWheelLock = false;
 window.addEventListener("wheel", (e) => {
-  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;   // horizontal — the stage handler owns it
+  if (Math.abs(e.deltaX) < 0.5 && Math.abs(e.deltaY) < 0.5) return;
   // Let genuinely-scrollable overlay text scroll instead of hijacking the swipe.
   const sc = e.target && e.target.closest && e.target.closest(".help-text");
-  if (sc && sc.scrollHeight > sc.clientHeight + 1) {
+  if (sc && sc.scrollHeight > sc.clientHeight + 1 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
     const atTop = sc.scrollTop <= 0, atBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1;
     if (!((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom))) return;
   }
   e.preventDefault();
-  clearTimeout(wheelYTimer);
-  wheelYTimer = setTimeout(() => { wheelY = 0; wheelYLock = false; }, 300);
-  if (wheelYLock) return;
-  if (animating || document.body.classList.contains("tour-on")) return;
-  wheelY += e.deltaY;
-  if (Math.abs(wheelY) < 50) return;
-  const up = -wheelY < 0;                                  // finger moved up
-  wheelYLock = true; wheelY = 0;
-  if (document.body.classList.contains("menu-open")) { if (up) closeMenu(true); }        // swipe up closes the top menu
-  else if (document.body.classList.contains("guide-open")) { if (!up) closeGuide(); }    // swipe down closes the help sheet
-  else if (up) openGuide(); else openMenu();                                             // up = help, down = menu
+  clearTimeout(gWheelTimer);
+  gWheelTimer = setTimeout(() => { gDX = 0; gDY = 0; gWheelLock = false; }, 300);
+  if (gWheelLock) return;                                  // already acted this gesture (incl. momentum)
+  gDX += e.deltaX; gDY += e.deltaY;
+  const horiz = Math.abs(gDX) >= Math.abs(gDY);
+  if ((horiz ? Math.abs(gDX) : Math.abs(gDY)) < 45) return;
+  gWheelLock = true;
+  const menuOpen = document.body.classList.contains("menu-open");
+  const guideOpen = document.body.classList.contains("guide-open");
+  if (horiz) {
+    if (menuOpen || guideOpen || document.body.classList.contains("tour-on")) return; // no page-nav under a sheet
+    const dx = -gDX;
+    if (document.body.classList.contains("playing")) commitSwipe(dx > 0 ? 1 : -1);
+    else if (canHomeModeSwipe()) commitModeSwipe(dx < 0);
+  } else {
+    const up = -gDY < 0;                                   // finger moved up
+    if (menuOpen) { if (up) closeMenu(true); }             // swipe up closes the top menu
+    else if (guideOpen) { if (!up) closeGuide(); }         // swipe down closes the help sheet
+    else if (up) openGuide(); else openMenu();             // nothing open: up = help, down = menu
+  }
 }, { passive: false });
 stageEl.addEventListener("pointermove", (e) => {
   if (longPressTimer && (Math.abs(e.clientX - swipeX) > 10 || Math.abs(e.clientY - swipeY) > 10)) cancelLongPress();
