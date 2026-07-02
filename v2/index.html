@@ -761,7 +761,9 @@
   }
   .win-actions {
     display: flex;
-    gap: 2.5em;
+    flex-direction: column;   /* Home above Share, stacked */
+    align-items: center;
+    gap: 1.1em;
   }
   /* Share/Home — clickable, so full black and identical to the Submit button. */
   .win-btn {
@@ -894,6 +896,17 @@
   /* Submit goes green once all six numbers are used (a "you can stop" cue). */
   .menu-btn.ready { color: var(--green); }
   .guide-back, .guide-back-inner, .back-btn { color: var(--red); } /* all Back buttons are red */
+  /* Menu layout: the folders / page-names stay centred; the edge controls — the
+     profile icon up top (top menu) and the "?" / Back buttons down low (profile
+     menu) — sit out toward their edge, between the centred block and the edge. */
+  #menu-profile { position: absolute; left: 0; right: 0; margin: 0; top: 15vh; }
+  .guide-back, .guide-back-inner, .back-btn, #account-help {
+    position: absolute; left: 0; right: 0; margin: 0; bottom: 15vh;
+  }
+  /* Tall / scrollable / input views keep Back in normal flow (no overlap). */
+  .guide-rules-view .guide-back, .guide-overview-view .guide-back,
+  .guide-help-view .back-btn, .guide-settings-view .back-btn,
+  .guide-auth-view .guide-back, .guide-username-view .guide-signout { position: static; bottom: auto; }
   /* End game: red, pinned to the bottom of the menu; turns green once every
      number is used (then it's a real Submit). */
   #menu-submit {
@@ -2154,7 +2167,7 @@ function evaluate() {
   if (/[x+÷^√-]{2}/.test(expr)) return invalidError();
   // Multiplying by a lone zero is a sneaky way to wipe numbers — reject it. (A
   // standalone "0"; "10"/"0.5" are unaffected since 0 is only ever a whole chip.)
-  if (/x0(?![0-9.])/.test(expr) || /(^|[-+x÷^√(])0x/.test(expr)) return invalidError();
+  if (/x0(?![0-9.])/.test(expr) || /(^|[-+x÷^√(])0x/.test(expr)) return zeroMultiplyError();
   // Pure numeric evaluation in core/evaluate.js; this keeps the DOM/state side
   // effects. `closed` reflects any auto-closed brackets — sync the display to it.
   const r = evalExpression(expr);
@@ -2235,6 +2248,16 @@ function invalidError() {
   saveState();
   clearTimeout(errorFlashTimer);
   errorFlashTimer = setTimeout(() => { if (displayEl.classList.contains("error")) renderDisplay(); }, 900);
+}
+
+// Multiplying by zero is a sneaky way to wipe numbers: flash Error, free the
+// just-placed number, and delete the ×0 — collapse so the zero stands alone
+// ("0x7…" -> "0") or drops off a running value ("7x0" -> "7").
+function zeroMultiplyError() {
+  if (lastPlayed && lastPlayed.tentative) lastPlayed.tentative = false; // free the wiped number
+  expr = expr.replace(/(^|[-+x÷^√(])0x.*$/, "$1" + "0")   // zero as the left operand -> keep the 0
+             .replace(/x0(?![0-9.]).*$/, "");             // zero as the right operand -> drop the ×0
+  flashError();
 }
 
 // Flash "Error" over whatever the line already is (expr is fixed up by the
