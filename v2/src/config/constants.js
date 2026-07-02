@@ -11,6 +11,7 @@ export const AUTOSIGN_KEY = "numbersRound.autosign.v2";
 export const LANG_KEY = "numbersRound.lang.v2";
 export const MODE_KEY = "numbersRound.mode.v2";
 export const SCALE_KEY = "numbersRound.scale.v2";
+export const COLORVIS_KEY = "numbersRound.colorvis.v2";
 
 // The timed budget: the green ring's full lap, in seconds (2:00).
 export const TIMED_SEC = 120;

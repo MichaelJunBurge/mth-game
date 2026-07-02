@@ -942,6 +942,12 @@
   .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
   .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
   .std-toggle { font: inherit; font-size: calc(var(--size-ui) * 0.72); letter-spacing: 0.12em; color: var(--red); background: none; border: none; padding: 0; margin-left: 0.5em; cursor: pointer; }
+  .set-color-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.6em 0 0.3em; text-align: center; }
+  .set-color-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5em; margin-bottom: 0.4em; }
+  .color-swatch { width: 1.5em; height: 1.5em; border-radius: 50%; border: 2px solid transparent; background: var(--sw); cursor: pointer; padding: 0; }
+  .color-swatch.none { background: none; border-color: var(--muted); position: relative; }
+  .color-swatch.none::after { content: "×"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 0.9em; }
+  .color-swatch.sel { border-color: var(--ink); }
   .game-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; padding: 0.4em 0; cursor: pointer; }
   .game-row.disabled { opacity: 0.4; pointer-events: none; }   /* a group you can't send to yet (shows the countdown) */
   .trophy { margin-left: 0.35em; font-size: 0.9em; }
@@ -1209,6 +1215,7 @@
       <button id="menu-auto" class="menu-btn">auto = (on)</button>
       <button id="menu-sign" class="menu-btn">Auto (×)</button>
       <button id="menu-theme" class="menu-btn">Dark mode</button>
+      <button id="menu-color" class="menu-btn">color vision (on)</button>
       <button id="menu-lang" class="menu-btn">language (english)</button>
       <div id="menu-scale-wrap" class="menu-scale-wrap">
         <div id="menu-scale-label" class="menu-scale-label">size (100%)</div>
@@ -1263,6 +1270,8 @@
       <button id="set-username" class="menu-btn" data-i18n="set.username">change username</button>
       <button id="set-email" class="menu-btn" data-i18n="set.email">change email</button>
       <button id="set-password" class="menu-btn" data-i18n="set.password">change password</button>
+      <div class="set-color-label" data-i18n="set.color">account color</div>
+      <div id="set-color" class="set-color-row"></div>
       <button class="menu-btn guide-signout danger" data-i18n="auth.signout">sign out</button>
       <button id="set-reset" class="menu-btn danger" data-i18n="set.reset">reset account</button>
       <button id="set-delete" class="menu-btn danger" data-i18n="set.delete">delete account</button>
@@ -1349,7 +1358,7 @@ import { evalExpression } from "./src/core/evaluate.js";
 import { computeScore as coreComputeScore, goalFor, distance as coreDistance, verdict } from "./src/core/scoring.js";
 import { buildSnapshot, normalizeSnapshot } from "./src/core/gameState.js";
 // Cross-cutting constants + the localStorage wrapper.
-import { SAVE_KEY, THEME_KEY, AUTOEQ_KEY, AUTOSIGN_KEY, LANG_KEY, MODE_KEY, SCALE_KEY, TIMED_SEC, MAX_CALCS, THEME_BG } from "./src/config/constants.js";
+import { SAVE_KEY, THEME_KEY, AUTOEQ_KEY, AUTOSIGN_KEY, LANG_KEY, MODE_KEY, SCALE_KEY, COLORVIS_KEY, TIMED_SEC, MAX_CALCS, THEME_BG } from "./src/config/constants.js";
 import { storage } from "./src/services/storage.js";
 import { t, setLang, getLang } from "./src/services/i18n.js";
 import { encodeGame, parseShareParams } from "./src/services/share.js";
@@ -3471,6 +3480,7 @@ function applyLang() {
   applyTheme(document.body.classList.contains("dark") ? "dark" : "light");
   applyAutoEqual(autoEqual);
   applyAutoSign(autoSign);
+  applyColorVision(colorVisionOn);
   document.getElementById("menu-lang").textContent = t("menu.lang");
   applyScale(document.documentElement.style.getPropertyValue("--scale") || 1); // re-label "size (N%)"
   const sub = document.getElementById("menu-submit");
@@ -3725,6 +3735,7 @@ document.getElementById("menu-reset").addEventListener("click", () => { closeMen
 document.getElementById("menu-home").addEventListener("click", () => { closeMenu(false); goHome(); });
 submitEl.addEventListener("click", finishSubmitted);
 document.getElementById("menu-theme").addEventListener("click", toggleTheme);
+document.getElementById("menu-color").addEventListener("click", toggleColorVision);
 document.getElementById("menu-auto").addEventListener("click", toggleAutoEqual);
 document.getElementById("menu-sign").addEventListener("click", cycleAutoSign);
 document.getElementById("menu-scale").addEventListener("input", (e) => setScale(e.target.value));
@@ -3775,11 +3786,64 @@ function applyAuthState(session, username) {
   document.getElementById("nav-help").setAttribute("aria-label", session ? t("auth.profile") : t("auth.help"));
   document.getElementById("guide-profile").textContent = session ? (username || t("auth.setName")) : t("auth.signin");
   refreshRankedTries(); // show/clear "N left today" under the Ranked word
+  if (session) loadMyColor(); else { myNameColor = null; paintAccountName(); }
 }
-function showAccount(u) { document.getElementById("account-username").textContent = u || ""; setGuideView("account"); }
+function showAccount(u) { document.getElementById("account-username").textContent = u || ""; paintAccountName(); setGuideView("account"); }
 // Account settings (tap the username). Uses native prompt/confirm for these rare
 // actions; reset/delete confirm TWICE. authApi()/showToast/applyAuthState in scope.
-function openSettings() { document.getElementById("settings-msg").textContent = ""; setGuideView("settings"); }
+function openSettings() { document.getElementById("settings-msg").textContent = ""; setGuideView("settings"); renderColorSwatches(); }
+
+// ---- Account colors ----------------------------------------------------
+// A per-profile display color shown for that user's username. "color vision"
+// (top menu, default on) hides everyone else's color when off — mine always
+// shows. Needs v2/sql/account-color.sql; degrades to no-colors without it.
+const COLOR_PALETTE = ["#d64545", "#e0821e", "#caa100", "#2f9e44", "#0f9b8e", "#3b82f6", "#6366f1", "#9333ea", "#db2777"];
+let colorsMod = null, myNameColor = null, colorVisionOn = true;
+const nameColors = new Map(); // username -> hex color (null = checked, none)
+async function colorsApi() { if (!colorsMod) colorsMod = await import("./src/services/colors.js"); return colorsMod; }
+const safeHex = (c) => (/^#[0-9a-fA-F]{6}$/.test(c || "") ? c : null);
+// The color to render a username in (null = default ink), honoring color vision.
+function nameColor(username) {
+  if (!username) return null;
+  const isMe = username === authUsername;
+  const c = isMe ? myNameColor : (colorVisionOn ? nameColors.get(username) : null);
+  return safeHex(c);
+}
+// Username wrapped in its color (extra = trailing html kept inside the span).
+function coloredName(username, extra) {
+  const inner = escHtml(username || "?") + (extra || "");
+  const c = nameColor(username);
+  return c ? '<span style="color:' + c + '">' + inner + '</span>' : inner;
+}
+// Fetch + cache colors for any usernames not seen yet (call before a render).
+async function loadColors(names) {
+  const missing = [...new Set((names || []).filter(Boolean))].filter((n) => n !== authUsername && !nameColors.has(n));
+  if (!missing.length) return;
+  try { const m = await (await colorsApi()).colorsFor(missing); missing.forEach((n) => nameColors.set(n, m[n] || null)); }
+  catch (e) { missing.forEach((n) => nameColors.set(n, null)); }
+}
+async function loadMyColor() {
+  try { myNameColor = safeHex(await (await colorsApi()).myColor()); } catch (e) { myNameColor = null; }
+  paintAccountName();
+}
+// Colour the username shown in the account (profile) view.
+function paintAccountName() {
+  const el = document.getElementById("account-username");
+  if (el) el.style.color = safeHex(myNameColor) || "";
+}
+function renderColorSwatches() {
+  const row = document.getElementById("set-color");
+  if (!row) return;
+  const none = '<button class="color-swatch none' + (myNameColor ? "" : " sel") + '" data-color="" aria-label="' + t("set.noColor") + '"></button>';
+  const sw = COLOR_PALETTE.map((c) => '<button class="color-swatch' + (myNameColor === c ? " sel" : "") + '" style="--sw:' + c + '" data-color="' + c + '" aria-label="color"></button>').join("");
+  row.innerHTML = none + sw;
+}
+function applyColorVision(on) {
+  colorVisionOn = on;
+  const btn = document.getElementById("menu-color");
+  if (btn) btn.textContent = t(on ? "menu.colorOn" : "menu.colorOff");
+}
+function toggleColorVision() { applyColorVision(!colorVisionOn); storage.set(COLORVIS_KEY, colorVisionOn ? "on" : "off"); }
 async function settingsAction(fn, okKey) {
   const msg = document.getElementById("settings-msg"); msg.textContent = t("auth.working");
   try { const r = await fn(); msg.textContent = r.ok ? t(okKey) : (r.message || t("auth.err")); return r; }
@@ -3842,6 +3906,14 @@ document.querySelectorAll(".guide-signout").forEach((b) => b.addEventListener("c
 // ---- Account settings ----
 document.getElementById("account-username").addEventListener("click", openSettings);
 document.getElementById("settings-back").addEventListener("click", () => showAccount(authUsername));
+document.getElementById("set-color").addEventListener("click", async (e) => {
+  const sw = e.target.closest("[data-color]"); if (!sw) return;
+  const color = sw.dataset.color || null;
+  const prev = myNameColor;
+  myNameColor = safeHex(color); renderColorSwatches(); paintAccountName(); // optimistic
+  try { const r = await (await colorsApi()).setColor(color); if (!r.ok) throw 0; }
+  catch (err) { myNameColor = prev; renderColorSwatches(); paintAccountName(); showToast(t("auth.offline")); }
+});
 document.getElementById("set-username").addEventListener("click", async () => {
   const name = prompt(t("set.newUsername")); if (name == null) return;
   const r = await settingsAction(async () => (await authApi()).setUsername(name), "set.done");
@@ -3925,7 +3997,7 @@ async function openFriends() {
 }
 const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function friendRow(name, actsHtml) {
-  return '<div class="friend-row"><div class="uname">' + escHtml(name) + '</div><div class="friend-acts">' + actsHtml + '</div></div>';
+  return '<div class="friend-row"><div class="uname">' + coloredName(name) + '</div><div class="friend-acts">' + actsHtml + '</div></div>';
 }
 async function renderFriends(results) {
   const body = document.getElementById("friends-body");
@@ -3934,6 +4006,7 @@ async function renderFriends(results) {
   try { rels = await (await friendsApi()).listFriendships(); }
   catch (e) { body.innerHTML = '<div class="stat-line">' + t("auth.offline") + '</div>'; return; }
   const byId = new Map(rels.map((r) => [r.other_id, r]));
+  await loadColors([...rels.map((r) => r.username), ...((results || []).map((u) => u.username))]);
   let html = "";
   // Search results (with the right action per existing relationship).
   if (results && results.length) {
@@ -4147,6 +4220,8 @@ async function renderGroupDetail(searchResults) {
     markGroupGamesSeen((games || []).filter((gm) => gm.completed).map((gm) => gm.cid));
     groupNews.delete(currentGroupId); updateGroupBadge();
     const memberIds = new Set(members.map((m) => m.user_id));
+    await loadColors([...members.map((m) => m.username), ...(standings || []).map((s) => s.username), ...(globalStd || []).map((s) => s.username),
+      ...(searchResults || []).map((u) => u.username), ...(games || []).flatMap((gm) => (gm.board || []).map((a) => a.username))]);
     let html = "";
     if (searchResults && searchResults.length) {
       html += '<div class="games-label">' + t("friends.results") + '</div>';
@@ -4164,14 +4239,14 @@ async function renderGroupDetail(searchResults) {
       if (groupGlobalStandings) {
         (globalStd || []).forEach((s, i) => {
           const me = s.username === authUsername;
-          html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(s.username || "?") + '</span><span class="res">' + t("lb.pts", { p: s.points }) + '</span></div>';
+          html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + coloredName(s.username) + '</span><span class="res">' + t("lb.pts", { p: s.points }) + '</span></div>';
         });
       } else {
         standings.forEach((s, i) => {
           const me = s.username === authUsername;
           const trophy = (s.fastest ? '<span class="trophy" title="' + t("trophy.fastest") + '">⚡</span>' : '') +
                          (s.most_correct ? '<span class="trophy" title="' + t("trophy.correct") + '">👓</span>' : '');
-          html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(s.username || "?") + trophy + '</span><span class="res">' + t("groups.pts", { p: s.points }) + '</span></div>';
+          html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + coloredName(s.username, trophy) + '</span><span class="res">' + t("groups.pts", { p: s.points }) + '</span></div>';
         });
       }
       html += '</div>';
@@ -4195,7 +4270,7 @@ async function renderGroupDetail(searchResults) {
       (gm.board || []).slice(0, 8).forEach((a, i) => {
         const me = a.username === authUsername;
         const res = a.solved ? fmtTime(Math.round(a.time_sec)) : (a.distance >= 1e8 ? "—" : t("games.off", { d: Math.round(a.distance) }));
-        html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(a.username || "?") + '</span><span class="res">' + res + '</span></div>';
+        html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + coloredName(a.username) + '</span><span class="res">' + res + '</span></div>';
       });
       html += '</div>';
     });
@@ -4252,8 +4327,9 @@ async function h2hSectionHtml() {
     played.forEach((p) => tally(p.challenge.creator_username, gOut(p.attempt), gOut(p.challenge.payload.o)));
     const rows = [...map.values()].sort((a, b) => b.games - a.games || b.wins - a.wins);
     if (!rows.length) return '<div class="stat-line">' + t("h2h.empty") + '</div>';
+    await loadColors(rows.map((r) => r.username));
     let html = '<div class="lb">';
-    rows.forEach((r) => { html += '<div class="lb-row"><span class="who">' + escHtml(r.username) + '</span><span class="res">' + t("h2h.record", { w: r.wins, l: r.losses, n: r.games }) + '</span></div>'; });
+    rows.forEach((r) => { html += '<div class="lb-row"><span class="who">' + coloredName(r.username) + '</span><span class="res">' + t("h2h.record", { w: r.wins, l: r.losses, n: r.games }) + '</span></div>'; });
     return html + '</div>';
   } catch (e) { return '<div class="stat-line">' + t("auth.offline") + '</div>'; }
 }
@@ -4271,8 +4347,9 @@ async function openLeaderboard() {
     let html = '<div class="games-label">' + t("lb.title") + '</div>';
     if (!lb.rows.length) html += '<div class="stat-line">' + t("lb.empty") + '</div>';
     else {
+      await loadColors(lb.rows.map((r) => r.username));
       html += '<div class="lb">';
-      lb.rows.forEach((r) => { const isMe = r.user_id === lb.me; html += '<div class="lb-row' + (isMe ? " me" : "") + '"><span class="rank">' + r.rnk + '</span><span class="who">' + escHtml(r.username || "?") + '</span><span class="res">' + t("lb.pts", { p: r.points }) + '</span></div>'; });
+      lb.rows.forEach((r) => { const isMe = r.user_id === lb.me; html += '<div class="lb-row' + (isMe ? " me" : "") + '"><span class="rank">' + r.rnk + '</span><span class="who">' + coloredName(r.username) + '</span><span class="res">' + t("lb.pts", { p: r.points }) + '</span></div>'; });
       html += '</div>';
     }
     html += '<div class="games-label">' + t("stats.title") + '</div>' + statsHtml(st);
@@ -4783,6 +4860,7 @@ setLang(storage.get(LANG_KEY) === "ko" ? "ko" : "en");
 gameMode = "practice"; // always open on practice so ranked games are never started by accident
 applyTheme(storage.get(THEME_KEY) || "light");
 applyScale(storage.get(SCALE_KEY) || 0.8); // default: slider centred (80%)
+applyColorVision(storage.get(COLORVIS_KEY) !== "off"); // default on
 applyAutoEqual((storage.get(AUTOEQ_KEY) || "on") !== "off");
 applyAutoSign(storage.get(AUTOSIGN_KEY) || "x");
 applyLang();
