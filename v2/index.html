@@ -1003,7 +1003,9 @@
   .stat-bar .cnt { color: var(--ink); text-align: left; }
   .auth-input {
     font-family: var(--font);
-    font-size: var(--size-ui);
+    /* >=16px so iOS Safari never auto-zooms the page when the field is focused
+       (double-tap zoom is already blocked by touch-action: manipulation). */
+    font-size: max(16px, var(--size-ui));
     font-weight: 700;
     color: var(--ink);
     background: none;
@@ -1907,19 +1909,52 @@ function renderHistory() {
   });
 }
 
-// Clear key: a tap is one undo; holding repeats it (after a short delay) until
-// the finger lifts, so you can wind the whole line back without tapping.
-let clearHoldDelay = null, clearHoldRepeat = null;
+// Clear key: a tap deletes the last thing on the line (a backspace); holding
+// repeats it until the finger lifts; a quick double-tap clears the whole line.
+// (touch-action: manipulation already blocks the double-tap-to-zoom this would
+// otherwise trigger on mobile.)
+let clearHoldDelay = null, clearHoldRepeat = null, lastClearTap = 0;
 function startClearHold() {
-  undo();                                    // immediate single step
+  const now = Date.now();
+  if (now - lastClearTap < 300) {            // double-tap -> clear the whole line
+    lastClearTap = 0;
+    stopClearHold();
+    clearLine();
+    return;
+  }
+  lastClearTap = now;
+  deleteLast();                              // immediate single delete
   clearHoldDelay = setTimeout(() => {
-    clearHoldRepeat = setInterval(undo, 110);
+    clearHoldRepeat = setInterval(deleteLast, 110);
   }, 350);
 }
 function stopClearHold() {
   clearTimeout(clearHoldDelay);
   clearInterval(clearHoldRepeat);
   clearHoldDelay = clearHoldRepeat = null;
+}
+
+// Delete the last token from the current line. A trailing number comes off as a
+// unit and returns to its slot/chip; an operator or bracket comes off as one
+// character. On an evaluated running result, step back to the equation first.
+function deleteLast() {
+  if (lineSum !== null) { undo(); return; }
+  if (expr === "") return;
+  const m = expr.match(/\d+\.?\d*$/);
+  if (m) {
+    const numStr = m[0];
+    expr = expr.slice(0, -numStr.length);
+    for (let i = available.length - 1; i >= 0; i--) {   // free the matching placed number
+      const e = available[i];
+      if (e.tentative && String(e.value) === numStr) { e.tentative = false; break; }
+    }
+  } else {
+    expr = expr.slice(0, -1);                           // an operator or bracket
+  }
+  refreshSlots();
+  renderGenerated();
+  renderDisplay();
+  saveState();
 }
 
 // Fade each slot that is permanently used OR tentatively placed on the line.
