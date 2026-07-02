@@ -1913,25 +1913,48 @@ function renderHistory() {
 // repeats it until the finger lifts; a quick double-tap clears the whole line.
 // (touch-action: manipulation already blocks the double-tap-to-zoom this would
 // otherwise trigger on mobile.)
-let clearHoldDelay = null, clearHoldRepeat = null, lastClearTap = 0;
+// A quick tap deletes the last token; a second tap within DOUBLE_MS makes it a
+// double-tap that clears the line instead — so the single delete is deferred by
+// DOUBLE_MS and cancelled if the double arrives. That way a double-tap clears
+// the INTACT running sum: clearLine() banks it to the tape and leaves it as a
+// usable chip (just like pressing =), rather than deleting it first.
+const DOUBLE_MS = 260;
+let clearHoldDelay = null, clearHoldRepeat = null, clearSingleTimer = null, lastClearUp = 0, clearDidHold = false, clearConsumed = false;
+function clearHoldTimers() {
+  clearTimeout(clearHoldDelay);
+  clearInterval(clearHoldRepeat);
+  clearHoldDelay = clearHoldRepeat = null;
+}
 function startClearHold() {
-  const now = Date.now();
-  if (now - lastClearTap < 300) {            // double-tap -> clear the whole line
-    lastClearTap = 0;
-    stopClearHold();
+  // Second tap of a double: cancel the pending single delete, ignore this tap's
+  // release, and clear the whole line (banking the intact running sum).
+  if (Date.now() - lastClearUp < DOUBLE_MS) {
+    clearTimeout(clearSingleTimer); clearSingleTimer = null;
+    clearHoldTimers();
+    clearDidHold = false;
+    clearConsumed = true;
+    lastClearUp = 0;
     clearLine();
     return;
   }
-  lastClearTap = now;
-  deleteLast();                              // immediate single delete
+  clearConsumed = false;
+  clearDidHold = false;
+  // Press-and-hold: after a short delay, delete repeatedly until release.
   clearHoldDelay = setTimeout(() => {
+    clearDidHold = true;
+    deleteLast();
     clearHoldRepeat = setInterval(deleteLast, 110);
   }, 350);
 }
 function stopClearHold() {
-  clearTimeout(clearHoldDelay);
-  clearInterval(clearHoldRepeat);
-  clearHoldDelay = clearHoldRepeat = null;
+  clearHoldTimers();
+  if (clearConsumed) { clearConsumed = false; return; }      // double-tap already cleared
+  if (clearDidHold) { clearDidHold = false; lastClearUp = 0; return; } // hold already deleted
+  // A quick tap: wait to see if a second tap turns it into a double (clear line);
+  // if none arrives within DOUBLE_MS, it was a single delete.
+  lastClearUp = Date.now();
+  clearTimeout(clearSingleTimer);
+  clearSingleTimer = setTimeout(() => { clearSingleTimer = null; deleteLast(); }, DOUBLE_MS);
 }
 
 // Delete the last token from the current line. A trailing number comes off as a
@@ -2097,6 +2120,9 @@ function pressKey(label) {
   // after another REPLACES it (e.g. "5÷" then "x" -> "5x"), so you can correct the
   // sign without deleting. Brackets are handled above, so they never replace.
   const last = expr[expr.length - 1] || "";
+  // An operator can't immediately follow an opening bracket — a "(" must be
+  // followed by a number. Flash an error and auto-delete the stray bracket.
+  if (last === "(") { expr = expr.slice(0, -1); flashError(); return; }
   expr = /[+\-x÷^√]/.test(last) ? expr.slice(0, -1) + label : expr + label;
   renderDisplay();
   saveState();
@@ -2126,6 +2152,9 @@ function evaluate() {
   // Two operators in a row (e.g. "5xx6") is a slip, not exponentiation — roll it
   // back to the first number + operator instead of computing something silly.
   if (/[x+÷^√-]{2}/.test(expr)) return invalidError();
+  // Multiplying by a lone zero is a sneaky way to wipe numbers — reject it. (A
+  // standalone "0"; "10"/"0.5" are unaffected since 0 is only ever a whole chip.)
+  if (/x0(?![0-9.])/.test(expr) || /(^|[-+x÷^√(])0x/.test(expr)) return invalidError();
   // Pure numeric evaluation in core/evaluate.js; this keeps the DOM/state side
   // effects. `closed` reflects any auto-closed brackets — sync the display to it.
   const r = evalExpression(expr);
@@ -2200,6 +2229,17 @@ function invalidError() {
   if (lastPlayed && lastPlayed.tentative) lastPlayed.tentative = false; // free the last number
   expr = expr.replace(/\d+(?:\.\d+)?$/, "");            // strip the trailing number
   expr = expr.replace(/([^0-9.]{2,})$/, (m) => m[0]);   // collapse a run of trailing operators to the first
+  refreshSlots();
+  renderGenerated();
+  showError();
+  saveState();
+  clearTimeout(errorFlashTimer);
+  errorFlashTimer = setTimeout(() => { if (displayEl.classList.contains("error")) renderDisplay(); }, 900);
+}
+
+// Flash "Error" over whatever the line already is (expr is fixed up by the
+// caller), then reveal the restored line. Used when there's nothing to strip.
+function flashError() {
   refreshSlots();
   renderGenerated();
   showError();
