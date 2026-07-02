@@ -68,7 +68,13 @@ export async function loginOrSignup(email, password) {
       return { status: "wrongpassword" };            // email exists -> the sign-in password was wrong
     return { status: "error", message: su.error.message };
   }
-  if (su.data.session) return { status: "signedin" }; // confirmation off -> logged in immediately
+  if (su.data.session) return { status: "signedin" }; // brand-new account, confirmation off -> logged in
+  // Email-confirmation OFF: signing up an ALREADY-registered email returns an
+  // obfuscated user with an empty `identities` array and no session (Supabase
+  // hides that the email exists). That means the email is taken and the earlier
+  // sign-in simply had the wrong password — never a new account here.
+  const ids = su.data.user && su.data.user.identities;
+  if (Array.isArray(ids) && ids.length === 0) return { status: "wrongpassword" };
   return { status: "confirm" };                       // confirmation on -> must click the email link
 }
 

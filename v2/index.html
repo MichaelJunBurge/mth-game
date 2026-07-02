@@ -884,11 +884,11 @@
   }
   .menu-slider::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
-    width: 18px; height: 18px; border-radius: 50%;
+    width: var(--thumb, 18px); height: var(--thumb, 18px); border-radius: 50%;
     background: var(--ink); cursor: pointer;
   }
   .menu-slider::-moz-range-thumb {
-    width: 18px; height: 18px; border: none; border-radius: 50%;
+    width: var(--thumb, 18px); height: var(--thumb, 18px); border: none; border-radius: 50%;
     background: var(--ink); cursor: pointer;
   }
   /* Submit goes green once all six numbers are used (a "you can stop" cue). */
@@ -3546,7 +3546,7 @@ function applyScale(v) {
   const s = Math.max(0.6, Math.min(1, Number(v) || 0.8));
   document.documentElement.style.setProperty("--scale", String(s));
   const slider = document.getElementById("menu-scale");
-  if (slider) slider.value = String(s);
+  if (slider) { slider.value = String(s); slider.style.setProperty("--thumb", (12 + (s - 0.6) / 0.4 * 10).toFixed(1) + "px"); } // thumb grows 12->22px across the range
   const lbl = document.getElementById("menu-scale-label");
   if (lbl) lbl.textContent = t("menu.size", { p: Math.round(s * 100) });
   onViewportResize();
