@@ -941,6 +941,7 @@
   /* Active games list. */
   .games-body { display: flex; flex-direction: column; gap: 0.4vh; width: min(82vw, 340px); max-height: 56vh; overflow-y: auto; }
   .games-label { font-size: calc(var(--size-ui) * 0.72); color: var(--muted); letter-spacing: 0.12em; margin: 0.9em 0 0.2em; }
+  .std-toggle { font: inherit; font-size: calc(var(--size-ui) * 0.72); letter-spacing: 0.12em; color: var(--red); background: none; border: none; padding: 0; margin-left: 0.5em; cursor: pointer; }
   .game-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; padding: 0.4em 0; cursor: pointer; }
   .game-row.disabled { opacity: 0.4; pointer-events: none; }   /* a group you can't send to yet (shows the countdown) */
   .trophy { margin-left: 0.35em; font-size: 0.9em; }
@@ -4061,7 +4062,7 @@ async function checkBeatBadge() {
   } catch (e) { /* offline */ }
 }
 // ---- Groups ----
-let groupsMod = null, currentGroupId = null, currentGroupName = "", groupSearchTimer = null;
+let groupsMod = null, currentGroupId = null, currentGroupName = "", groupSearchTimer = null, groupGlobalStandings = false;
 async function groupsApi() { if (!groupsMod) groupsMod = await import("./src/services/groups.js"); return groupsMod; }
 // Renders the groups list (invites + groups) into #groups-body inside the friends view.
 async function renderGroupsList() {
@@ -4130,7 +4131,7 @@ document.getElementById("group-create").addEventListener("click", async () => {
   try { if (await (await groupsApi()).createGroup(name)) renderGroupsList(); } catch (e) {}
 });
 async function openGroupDetail(gid, name) {
-  currentGroupId = gid; currentGroupName = name || "";
+  currentGroupId = gid; currentGroupName = name || ""; groupGlobalStandings = false;
   setGuideView("groupdetail");
   document.getElementById("group-detail-title").textContent = currentGroupName;
   document.getElementById("group-add-search").value = "";
@@ -4141,7 +4142,7 @@ async function renderGroupDetail(searchResults) {
   body.innerHTML = '<div class="stat-line">' + t("auth.working") + '</div>';
   try {
     const g = await groupsApi();
-    const [members, games, standings] = await Promise.all([g.listMembers(currentGroupId), g.games(currentGroupId), g.standings(currentGroupId)]);
+    const [members, games, standings, globalStd] = await Promise.all([g.listMembers(currentGroupId), g.games(currentGroupId), g.standings(currentGroupId), groupGlobalStandings ? g.standingsGlobal(currentGroupId) : Promise.resolve(null)]);
     // Opening a group's detail (its scoreboards) clears its completion notification.
     markGroupGamesSeen((games || []).filter((gm) => gm.completed).map((gm) => gm.cid));
     groupNews.delete(currentGroupId); updateGroupBadge();
@@ -4155,16 +4156,24 @@ async function renderGroupDetail(searchResults) {
           : '<button class="friend-act" data-addmember="' + u.id + '">' + t("friends.add") + '</button>');
       });
     }
-    // Within-group standings (points from every game played together) + trophies.
-    // Empty until v2/sql/groups-v2.sql is run; then it leads the detail view.
-    if (standings && standings.length) {
-      html += '<div class="games-label">' + t("groups.standings") + '</div><div class="lb">';
-      standings.forEach((s, i) => {
-        const me = s.username === authUsername;
-        const trophy = (s.fastest ? '<span class="trophy" title="' + t("trophy.fastest") + '">⚡</span>' : '') +
-                       (s.most_correct ? '<span class="trophy" title="' + t("trophy.correct") + '">👓</span>' : '');
-        html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(s.username || "?") + trophy + '</span><span class="res">' + t("groups.pts", { p: s.points }) + '</span></div>';
-      });
+    // Standings with a within-group ⇄ global toggle. Within = points from games
+    // played together (+ ⚡/👓 trophies); global = each member's worldwide points.
+    if ((standings && standings.length) || (globalStd && globalStd.length) || groupGlobalStandings) {
+      const toggle = '<button class="std-toggle" data-stdtoggle="1">' + (groupGlobalStandings ? t("groups.global") : t("groups.withinGroup")) + ' ⇄</button>';
+      html += '<div class="games-label">' + t("groups.standings") + ' ' + toggle + '</div><div class="lb">';
+      if (groupGlobalStandings) {
+        (globalStd || []).forEach((s, i) => {
+          const me = s.username === authUsername;
+          html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(s.username || "?") + '</span><span class="res">' + t("lb.pts", { p: s.points }) + '</span></div>';
+        });
+      } else {
+        standings.forEach((s, i) => {
+          const me = s.username === authUsername;
+          const trophy = (s.fastest ? '<span class="trophy" title="' + t("trophy.fastest") + '">⚡</span>' : '') +
+                         (s.most_correct ? '<span class="trophy" title="' + t("trophy.correct") + '">👓</span>' : '');
+          html += '<div class="lb-row' + (me ? " me" : "") + '"><span class="rank">' + (i + 1) + '</span><span class="who">' + escHtml(s.username || "?") + trophy + '</span><span class="res">' + t("groups.pts", { p: s.points }) + '</span></div>';
+        });
+      }
       html += '</div>';
     }
     // Games sent by others that are still open and I haven't played -> Play buttons.
@@ -4205,6 +4214,8 @@ document.getElementById("group-add-search").addEventListener("input", (e) => {
 document.getElementById("group-detail-body").addEventListener("click", async (e) => {
   const add = e.target.closest("[data-addmember]"), leave = e.target.closest("[data-leave]");
   const play = e.target.closest("[data-play]");
+  const stdToggle = e.target.closest("[data-stdtoggle]");
+  if (stdToggle) { groupGlobalStandings = !groupGlobalStandings; renderGroupDetail(null); return; }
   if (play) { closeGuide(); loadChallenge(play.dataset.play, false); return; } // play a group game (no gate)
   if (add) { add.disabled = true; try { const api = await groupsApi(); const r = await api.inviteMember(currentGroupId, add.dataset.addmember); if (!r.ok) await api.addMember(currentGroupId, add.dataset.addmember); /* pre-SQL fallback: direct add */ document.getElementById("group-add-search").value = ""; renderGroupDetail(null); } catch (err) {} }
   else if (leave) { try { await (await groupsApi()).leaveGroup(currentGroupId); openFriends(); } catch (err) {} }

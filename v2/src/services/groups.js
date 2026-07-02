@@ -70,6 +70,11 @@ export async function standings(gid) {
   const { data, error } = await supabase.rpc("group_standings", { p_gid: gid });
   return error ? [] : (data || []);
 }
+// Each member's GLOBAL ranked points (for the within-group ↔ global toggle).
+export async function standingsGlobal(gid) {
+  const { data, error } = await supabase.rpc("group_standings_global", { p_gid: gid });
+  return error ? [] : (data || []);
+}
 // Every game sent to a group: sender, 24h status, whether I've played it, + ranked scoreboard.
 export async function games(gid) {
   const { data, error } = await supabase.rpc("group_games", { p_gid: gid });
